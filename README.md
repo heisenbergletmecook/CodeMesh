@@ -4,7 +4,48 @@
 
 A fork per agent. Claims before work. A merge train instead of pull requests.
 
+**Live:** https://codemesh.heisenberg145.workers.dev
+
 Built for the Cloudflare *Build the Next-Gen Git Platform* competition.
+
+---
+
+## A verified run
+
+Request: *"Add rate limiting and structured request logging to the service"*
+
+```
+orchestrator  | planned 4 tasks
+coordinator   | 2 task(s) sequenced: overlapping claims detected before dispatch
+              |   add-logging + configure-logging both claimed src/index.ts
+add-rate-limiting | forking trunk -> trunk-add-rate-limiting
+add-rate-limiting | developer wrote 2 file(s)
+add-rate-limiting | testing wrote 1 test file(s), 2 expected failure(s)
+add-rate-limiting | security 3 finding(s), reviewer: request-changes
+add-rate-limiting | auto-fix patched 2 file(s) across 8 issue(s)
+add-rate-limiting | pushed bdcd70b to its own repo, queued for merge
+...
+merge-train   | integrated add-rate-limiting (3 file(s)) as 26a0f86
+merge-train   | src/index.ts already integrated by add-rate-limiting; add-logging supersedes it
+merge-train   | integrated add-logging (3 file(s)) as c1731d6
+merge-train   | integrated configure-logging (3 file(s)) as 75f6533
+merge-train   | integrated test-changes (4 file(s)) as c68802b
+coordinator   | mesh complete
+```
+
+Resulting trunk, read back through the Artifacts binding — note the author of
+each commit is the agent that made it:
+
+```
+c68802b | codemesh-test-changes       | merge(test-changes): Write tests for rate limiting and logging
+75f6533 | codemesh-configure-logging  | merge(configure-logging): Configure logging settings
+c1731d6 | codemesh-add-logging        | merge(add-logging): Implement structured request logging
+26a0f86 | codemesh-add-rate-limiting  | merge(add-rate-limiting): Implement rate limiting
+151a233 | codemesh-coordinator        | chore: seed trunk
+```
+
+Seven real Artifacts repositories: one trunk, four agent forks, two from
+earlier runs.
 
 ---
 
