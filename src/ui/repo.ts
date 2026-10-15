@@ -69,6 +69,38 @@ ${head("Repository — CodeMesh")}
   .kv .k { color: var(--faint); min-width: 104px; }
   .kv .v { color: var(--text); word-break: break-all; }
   .kv .v.mono { font-family: var(--mono); font-size: 12px; }
+  #edBody {
+    width: 100%; min-height: 360px; border: 0; border-top: 1px solid var(--line-2);
+    padding: 14px 16px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+    resize: vertical; background: #FCFCFD; color: var(--text);
+  }
+  #edBody:focus { outline: none; background: #fff; }
+  .commitbox { border-top: 1px solid var(--line-2); padding: 14px 16px; background: var(--bg); }
+  .cb-title { font-size: 13.5px; font-weight: 650; margin-bottom: 9px; }
+  .radio { display: flex; gap: 9px; align-items: flex-start; font-size: 13px;
+           padding: 7px 0; color: var(--dim); cursor: pointer; }
+  .radio input { margin-top: 3px; accent-color: var(--orange); }
+  .radio b { color: var(--text); font-weight: 600; }
+  .radio code { font-family: var(--mono); font-size: 12px; }
+  .cb-ai {
+    margin: 9px 0; padding: 9px 11px; background: var(--orange-soft);
+    border: 1px solid var(--orange-line); border-radius: 8px;
+    font-size: 12.5px; color: #8A5A44;
+  }
+  .cb-actions { display: flex; gap: 8px; margin-top: 4px; }
+  .newbtn {
+    background: var(--orange); color: #fff; border: 0; font-weight: 600;
+    padding: 9px 18px; border-radius: 9px; cursor: pointer; font-size: 13.5px;
+  }
+  .newbtn:disabled { opacity: .55; cursor: default; }
+  .ghostbtn {
+    background: var(--panel); color: var(--dim); border: 1px solid var(--line);
+    padding: 9px 16px; border-radius: 9px; cursor: pointer; font-size: 13.5px;
+  }
+  .hintline { font-size: 12.5px; color: var(--faint); margin-top: 9px; }
+  .hintline.err { color: var(--bad); }
+  .hintline.ok { color: var(--ok); }
+  button.badge { cursor: pointer; font-family: inherit; }
 </style>
 </head>
 <body>
@@ -100,8 +132,26 @@ ${head("Repository — CodeMesh")}
             <div class="fileview" id="fileview" style="display:none">
               <div class="fileview-head"><span class="nm" id="fvName"></span>
                 <span class="spacer" style="flex:1"></span>
+                <button class="badge" id="fvEdit">✎ Edit</button>
                 <a class="badge" id="fvRaw" target="_blank" rel="noopener">Raw</a></div>
               <pre id="fvBody"></pre>
+              <div id="editor" style="display:none">
+                <textarea id="edBody" spellcheck="false"></textarea>
+                <div class="commitbox">
+                  <div class="cb-title">Commit this change</div>
+                  <label class="radio"><input type="radio" name="cmode" value="branch" checked>
+                    <span><b>Create a new branch</b> — opens a change proposal, trunk untouched</span></label>
+                  <label class="radio"><input type="radio" name="cmode" value="direct">
+                    <span><b>Commit directly to <code id="cbBranch">main</code></b></span></label>
+                  <div class="cb-ai">✦ The commit message and description are written by the
+                    Change Intelligence agent from your actual diff — you do not type them.</div>
+                  <div class="cb-actions">
+                    <button class="newbtn" id="edSave">Commit change</button>
+                    <button class="ghostbtn" id="edCancel">Cancel</button>
+                  </div>
+                  <div class="hintline" id="edMsg"></div>
+                </div>
+              </div>
             </div>
           </div>
           <div class="panel" id="paneCommits" style="display:none">
@@ -150,6 +200,7 @@ async function load() {
         '<span class="badge">' + (r.status === "ready" ? "✓ " : "") + esc(r.status) + "</span>" +
         '<span class="badge">default branch <b>' + esc(r.defaultBranch) + "</b></span>" +
         (REPO.includes("-") && !REPO.startsWith("trunk-") ? "" : "");
+      defaultBranch = r.defaultBranch || "main";
       $("details").innerHTML = [
         ["Status", esc(r.status), ""],
         ["Default branch", esc(r.defaultBranch), ""],
@@ -202,6 +253,7 @@ async function load() {
 }
 
 async function openFile(path, el) {
+  currentPath = path;
   document.querySelectorAll(".files .f").forEach(n => n.classList.remove("on"));
   if (el) el.classList.add("on");
   const url = "/api/repos/" + encodeURIComponent(REPO) + "/file?path=" + encodeURIComponent(path);
@@ -246,6 +298,51 @@ $("filter").addEventListener("input", () => {
     el.style.display = el.dataset.path.toLowerCase().includes(q) ? "" : "none";
   });
 });
+let currentPath = null, defaultBranch = "main";
+
+$("fvEdit").onclick = () => {
+  $("edBody").value = $("fvBody").textContent;
+  $("fvBody").style.display = "none";
+  $("editor").style.display = "";
+  $("fvEdit").style.display = "none";
+  $("cbBranch").textContent = defaultBranch;
+  $("edMsg").textContent = "";
+  $("edMsg").className = "hintline";
+};
+function closeEditor() {
+  $("editor").style.display = "none";
+  $("fvBody").style.display = "";
+  $("fvEdit").style.display = "";
+}
+$("edCancel").onclick = closeEditor;
+
+$("edSave").onclick = async () => {
+  const mode = document.querySelector('input[name="cmode"]:checked').value;
+  const msg = $("edMsg");
+  $("edSave").disabled = true;
+  msg.className = "hintline";
+  msg.textContent = "Committing — the agent is writing the message from your diff…";
+  try {
+    const res = await fetch("/api/repos/" + encodeURIComponent(REPO) + "/edit", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: currentPath, content: $("edBody").value, mode })
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    msg.className = "hintline ok";
+    msg.innerHTML = "✓ <b>" + esc(d.message) + "</b> — " + esc(d.commit.slice(0, 7)) +
+      " on <code>" + esc(d.branch) + "</code>" +
+      (d.created ? " (new branch)" : "") + "<br>" + esc(d.description);
+    $("fvBody").textContent = $("edBody").value;
+    setTimeout(() => { closeEditor(); load(); }, 2600);
+  } catch (e) {
+    msg.className = "hintline err";
+    msg.textContent = String(e.message || e);
+  } finally {
+    $("edSave").disabled = false;
+  }
+};
+
 load();
 </script>
 </body>
@@ -273,6 +370,27 @@ ${head("Repositories — CodeMesh")}
   .rl a:hover .nm { color: var(--orange); }
   .rl .sub { font-size: 12.5px; color: var(--faint); margin-top: 2px; }
   .rl .when { margin-left: auto; font-size: 12.5px; color: var(--faint); }
+  .newbtn {
+    background: var(--orange); color: #fff; border: 0; font-weight: 600;
+    padding: 10px 18px; border-radius: 9px; cursor: pointer; font-size: 13.5px;
+  }
+  .newbtn:disabled { opacity: .55; cursor: default; }
+  .ghostbtn {
+    background: var(--panel); color: var(--dim); border: 1px solid var(--line);
+    padding: 10px 16px; border-radius: 9px; cursor: pointer; font-size: 13.5px;
+  }
+  .createbox {
+    background: var(--panel); border: 1px solid var(--orange-line); border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 16px; display: flex; gap: 9px; flex-wrap: wrap; align-items: center;
+  }
+  .createbox input {
+    flex: 1; min-width: 240px; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 9px; padding: 10px 13px; font-size: 13.5px; font-family: var(--mono);
+  }
+  .createbox input:focus { outline: none; border-color: var(--orange); background: #fff; }
+  .hintline { flex-basis: 100%; font-size: 12.5px; color: var(--faint); }
+  .hintline.err { color: var(--bad); }
+  .hintline.ok { color: var(--ok); }
 </style>
 </head>
 <body>
@@ -281,9 +399,20 @@ ${head("Repositories — CodeMesh")}
   <div>
     ${topbar("Filter repositories…")}
     <main>
-      <h1 class="page">Repositories</h1>
-      <p class="page">Every repository is a real Cloudflare Artifacts repository. Trunks hold
-         integrated history; the rest are per-task agent forks.</p>
+      <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap">
+        <div style="flex:1;min-width:280px">
+          <h1 class="page">Codebases</h1>
+          <p class="page">Every codebase is a real Cloudflare Artifacts repository. Trunks hold
+             integrated history; the rest are per-task agent forks.</p>
+        </div>
+        <button id="newRepo" class="newbtn">+ New codebase</button>
+      </div>
+      <div id="createBox" class="createbox" style="display:none">
+        <input type="text" id="newName" placeholder="codebase name, e.g. payments-api" autocomplete="off">
+        <button id="createGo" class="newbtn">Create</button>
+        <button id="createCancel" class="ghostbtn">Cancel</button>
+        <div class="hintline" id="createMsg">Letters, digits, dot, underscore and hyphen. Must start alphanumeric.</div>
+      </div>
       <div class="panel"><div class="rl" id="list"><div class="empty" style="padding:14px 16px">Loading…</div></div></div>
     </main>
   </div>
@@ -322,6 +451,42 @@ function paint() {
   }
 })();
 $("filter").addEventListener("input", paint);
+
+const box = $("createBox"), msg = $("createMsg");
+$("newRepo").onclick = () => {
+  box.style.display = box.style.display === "none" ? "flex" : "none";
+  if (box.style.display === "flex") $("newName").focus();
+};
+$("createCancel").onclick = () => { box.style.display = "none"; };
+
+async function createRepo() {
+  const name = $("newName").value.trim();
+  if (!name) return;
+  $("createGo").disabled = true;
+  msg.className = "hintline";
+  msg.textContent = "Creating repository and pushing the initial commit…";
+  try {
+    const res = await fetch("/api/repos", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name })
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    msg.className = "hintline ok";
+    msg.textContent = "Created " + d.name + " at " + d.commit.slice(0, 7) + ".";
+    $("newName").value = "";
+    const r = await (await fetch("/api/repos")).json();
+    repos = r.repos || [];
+    paint();
+  } catch (e) {
+    msg.className = "hintline err";
+    msg.textContent = String(e.message || e);
+  } finally {
+    $("createGo").disabled = false;
+  }
+}
+$("createGo").onclick = createRepo;
+$("newName").addEventListener("keydown", e => { if (e.key === "Enter") createRepo(); });
 </script>
 </body>
 </html>`;

@@ -176,7 +176,7 @@ const $ = (id) => document.getElementById(id);
 const REPO = decodeURIComponent(location.pathname.replace(/^\\/proposal\\//, ""));
 const MESH_ID = (REPO.match(/^trunk-([a-z0-9]+)-/) || [])[1];
 
-let agent = null, mesh = null, commits = [], entries = [], tab = "discussion";
+let agent = null, mesh = null, commits = [], entries = [], repoMeta = null, tab = "discussion";
 
 async function j(u) { const r = await fetch(u); if (!r.ok) throw new Error(await r.text()); return r.json(); }
 
@@ -212,6 +212,10 @@ async function load() {
     agent = (mesh.agents || []).find(a => a.repo === REPO);
   } catch (e) { /* run state may have rolled off */ }
 
+  try {
+    const d = await j("/api/repos");
+    repoMeta = (d.repos || []).find(x => x.name === REPO) || null;
+  } catch (e) {}
   try { commits = await j("/api/repos/" + encodeURIComponent(REPO) + "/log"); } catch (e) { commits = []; }
   try { entries = (await j("/api/repos/" + encodeURIComponent(REPO) + "/tree")).entries || []; } catch (e) {}
 
@@ -281,6 +285,10 @@ function paintTabs() {
     ["changes", "Changes", entries.length],
     ["checks", "Checks", checks],
     ["agents", "Agents", 6],
+    ["impact", "Impact", (a.task.claims || []).length],
+    ["docs", "Docs", docFiles().length],
+    ["deploy", "Deploy", ""],
+    ["settings", "Settings", ""],
   ];
   $("tabs").innerHTML = defs.map(([k, label, n]) =>
     '<button data-t="' + k + '"' + (k === tab ? ' class="on"' : "") + ">" + label +
@@ -349,18 +357,7 @@ function paintPane() {
         '<div class="sub">' + (changed.has(p) ? "changed by this proposal" : "inherited from trunk") + "</div></div></div>").join("")
         : '<div class="empty" style="padding:14px 16px">Empty.</div>') +
       '</div><pre id="fv" style="display:none"></pre>');
-    document.querySelectorAll(".filerow").forEach(el => {
-      el.onclick = async () => {
-        document.querySelectorAll(".filerow").forEach(n => n.classList.remove("on"));
-        el.classList.add("on");
-        const pre = $("fv"); pre.style.display = ""; pre.textContent = "Loading…";
-        try {
-          const r = await fetch("/api/repos/" + encodeURIComponent(REPO) +
-            "/file?path=" + encodeURIComponent(el.dataset.path));
-          pre.textContent = r.ok ? await r.text() : "Could not read file.";
-        } catch (e) { pre.textContent = String(e); }
-      };
-    });
+    wireFileRows();
   }
 
   if (tab === "checks") {
@@ -393,6 +390,122 @@ function paintPane() {
         '<div class="sub">' + new Date(l.t).toLocaleTimeString() + "</div></div></div>").join("")
         : '<div class="empty" style="padding:14px 16px">Run state has rolled off; see Commits.</div>') + "</div>");
   }
+
+  if (tab === "impact") {
+    // Real impact: which other proposals in this run touched the same paths,
+    // taken from the merge train's own supersede decisions.
+    const mine = new Set(a.files || []);
+    const siblings = (mesh && mesh.agents || []).filter(x => x.repo !== a.repo);
+    const collisions = siblings.map(s => {
+      const shared = (s.files || []).filter(f => mine.has(f));
+      return shared.length ? { id: s.task.id, shared } : null;
+    }).filter(Boolean);
+    const supersedes = (mesh && mesh.log || [])
+      .filter(l => l.agent === "merge-train" && l.msg.includes(a.task.id));
+    const high = (a.findings || []).filter(f => f.severity === "high").length;
+    const risk = high ? "High" : (a.findings || []).length ? "Medium" : "Low";
+
+    $("panes").innerHTML =
+      panel("Risk", "derived from this proposal's own security findings",
+        '<div class="pb"><div class="sum"><span class="' +
+        (high ? "c-bad" : (a.findings || []).length ? "c-warn" : "c-ok") + '">◆</span>' +
+        "<span><b>" + risk + " risk</b> — " + (a.findings || []).length +
+        " finding(s), " + high + " high-severity</span></div></div>") +
+      panel("Affected paths", "declared as claims before any work started",
+        '<div class="pb">' + ((a.task.claims || []).length
+          ? '<div class="claims" style="display:flex;flex-wrap:wrap;gap:6px">' +
+            a.task.claims.map(c =>
+              '<code style="font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--line);padding:3px 8px;border-radius:5px">' +
+              esc(c) + "</code>").join("") + "</div>"
+          : '<span class="muted">No claims declared.</span>') + "</div>") +
+      panel("Overlap with other proposals", "the collisions the mesh had to resolve",
+        collisions.length
+          ? '<div class="list">' + collisions.map(c =>
+              '<div class="item"><div class="av">⚠</div><div><div class="ttl">' + esc(c.id) + "</div>" +
+              '<div class="sub">shares ' + c.shared.map(esc).join(", ") + "</div></div></div>").join("") + "</div>"
+          : '<div class="empty" style="padding:14px 16px">No other proposal touched these files.</div>') +
+      panel("Merge train decisions", "recorded verbatim at integration time",
+        supersedes.length
+          ? '<div class="list">' + supersedes.map(l =>
+              '<div class="item"><div class="av">⇶</div><div class="ttl">' + esc(l.msg) + "</div></div>").join("") + "</div>"
+          : '<div class="empty" style="padding:14px 16px">Integrated without superseding anything.</div>');
+  }
+
+  if (tab === "docs") {
+    const docs = docFiles();
+    $("panes").innerHTML = panel("Documentation", "markdown in this proposal's repository",
+      docs.length
+        ? '<div class="list" id="dlist">' + docs.map(p =>
+            '<div class="item filerow" data-path="' + esc(p) + '">' +
+            '<div class="av">▤</div><div class="ttl mono">' + esc(p) + "</div></div>").join("") +
+          '</div><pre id="fv" style="display:none"></pre>'
+        : '<div class="empty" style="padding:14px 16px">No markdown files in this proposal.</div>');
+    wireFileRows();
+  }
+
+  if (tab === "deploy") {
+    const remote = (repoMeta && repoMeta.remote) || a.remote || "";
+    $("panes").innerHTML =
+      panel("Clone this proposal", "it is an ordinary Git remote",
+        '<div class="pb"><pre style="border:0;border-radius:8px;background:var(--bg);max-height:none">' +
+        esc("git clone " + remote) + "</pre>" +
+        '<div class="sub" style="margin-top:8px">Requires a repo-scoped Artifacts token. ' +
+        "Reads also work through the REST API and the Workers binding.</div></div>") +
+      panel("Deployment", "stated plainly rather than faked",
+        '<div class="pb muted">CodeMesh does not run a deployment pipeline. There are no preview ' +
+        "environments, release notes or rollout plans behind this tab. Cloudflare Workers Builds " +
+        "can deploy an Artifacts repo on push, and wiring that in is the natural next step — but " +
+        "nothing here would be real today, so nothing is shown.</div>");
+  }
+
+  if (tab === "settings") {
+    const r = repoMeta || {};
+    const rows = [
+      ["Proposal repo", a.repo, "mono"],
+      ["Integrates into", (mesh && mesh.trunk) || "—", "mono"],
+      ["Default branch", r.defaultBranch || "main", ""],
+      ["Status", r.status || a.status, ""],
+      ["Created", r.createdAt ? new Date(r.createdAt).toLocaleString() : "—", ""],
+      ["Forked from", r.source || "—", "mono"],
+      ["Repo ID", r.id || "—", "mono"],
+      ["Git remote", r.remote || "—", "mono"],
+    ];
+    $("panes").innerHTML =
+      panel("Merge policy", "fixed by the architecture, not configurable per proposal",
+        '<div class="pb">' +
+        '<div class="sum"><span class="c-ok">✓</span><span>Integration is a serialized merge train ' +
+        "— the trunk has exactly one writer</span></div>" +
+        '<div class="sum"><span class="c-ok">✓</span><span>Conflicts are prevented by claim ' +
+        "arbitration at dispatch, not resolved at merge</span></div>" +
+        '<div class="sum"><span class="c-ok">✓</span><span>No human approval gate: Security, ' +
+        "Reviewer and Auto-Fix run as functions</span></div></div>") +
+      panel("Repository metadata", "live from the Artifacts control plane",
+        '<div class="pb"><div class="kv">' + rows.map(([k, v, c]) =>
+          '<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line-2);font-size:13px">' +
+          '<span style="color:var(--faint);min-width:116px">' + k + "</span>" +
+          '<span class="' + c + '" style="word-break:break-all">' + esc(v) + "</span></div>").join("") +
+        "</div></div>");
+  }
+}
+
+/** Markdown files in this proposal, for the Docs tab. */
+function docFiles() {
+  return entries.filter(p => /\\.(md|mdx|txt)$/i.test(p));
+}
+
+function wireFileRows() {
+  document.querySelectorAll(".filerow").forEach(el => {
+    el.onclick = async () => {
+      document.querySelectorAll(".filerow").forEach(n => n.classList.remove("on"));
+      el.classList.add("on");
+      const pre = $("fv"); pre.style.display = ""; pre.textContent = "Loading…";
+      try {
+        const r = await fetch("/api/repos/" + encodeURIComponent(REPO) +
+          "/file?path=" + encodeURIComponent(el.dataset.path));
+        pre.textContent = r.ok ? await r.text() : "Could not read file.";
+      } catch (e) { pre.textContent = String(e); }
+    };
+  });
 }
 
 function paintDecision() {

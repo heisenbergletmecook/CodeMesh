@@ -14,12 +14,22 @@
  */
 
 import { MeshCoordinator } from "./coordinator";
+import { commitAs, commitFile, initWorkspace, listBranches, push, writeWorkspaceFile } from "./git";
+import { describeChange } from "./agents/roles";
 import { DASHBOARD } from "./ui/dashboard";
 import { REPO_PAGE, REPOS_PAGE } from "./ui/repo";
 import { PROPOSAL_PAGE, PROPOSALS_PAGE } from "./ui/proposal";
+import { PROFILE_PAGE } from "./ui/profile";
 import type { Env } from "./agents/model";
 
 export { MeshCoordinator };
+
+/** Starter contents for a freshly created repository. */
+const SEED_FILES = (name: string): Record<string, string> => ({
+  "README.md": `# ${name}\n\nCreated in CodeMesh. Run a mesh against it to have agents\nfork, implement, review and integrate changes concurrently.\n`,
+  "src/index.ts": `export function handler(req: Request): Response {\n  return new Response("ok");\n}\n`,
+  "package.json": JSON.stringify({ name, version: "0.1.0", type: "module" }, null, 2) + "\n",
+});
 
 function meshStub(env: Env, id: string) {
   return env.MESH.get(env.MESH.idFromName(id));
@@ -38,6 +48,7 @@ export default {
       if (path === "/" || path === "/index.html") return html(DASHBOARD);
       if (path === "/repos") return html(REPOS_PAGE);
       if (path.startsWith("/repo/")) return html(REPO_PAGE);
+      if (path === "/agents" || path === "/profile") return html(PROFILE_PAGE);
       if (path === "/proposals") return html(PROPOSALS_PAGE);
       if (path.startsWith("/proposal/")) return html(PROPOSAL_PAGE);
 
@@ -60,6 +71,31 @@ export default {
       if (meshMatch) {
         const stub = meshStub(env, meshMatch[1]);
         return stub.fetch("https://mesh/state");
+      }
+
+      if (path === "/api/repos" && req.method === "POST") {
+        const body = await req.json<{ name?: string; description?: string }>();
+        const name = (body?.name ?? "").trim();
+        // Artifacts naming rules: start alphanumeric, then letters, digits,
+        // dot, underscore or hyphen.
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$/.test(name)) {
+          return Response.json(
+            { error: "name must start alphanumeric and use only letters, digits, . _ -" },
+            { status: 400 },
+          );
+        }
+        const created = await env.ARTIFACTS.create(name, {
+          setDefaultBranch: "main",
+          description: body?.description ?? "Created in CodeMesh.",
+        });
+        // A repo with no commits has no default branch to clone, so seed it.
+        const ws = await initWorkspace();
+        for (const [p, content] of Object.entries(SEED_FILES(name))) {
+          await writeWorkspaceFile(ws, p, content);
+        }
+        const commit = await commitAs(ws, "coordinator", "chore: initial commit");
+        await push({ name, remote: created.remote, token: created.token }, ws);
+        return Response.json({ name, remote: created.remote, commit });
       }
 
       if (path === "/api/repos") {
@@ -101,6 +137,70 @@ export default {
           return out;
         };
         return Response.json({ entries: await walk(commits[0].treeHash, "") });
+      }
+
+      // Branches, read off the Git remote — the only authoritative source,
+      // since neither the binding nor the REST API exposes refs.
+      // Edit a file from the browser. The commit message and the proposal
+      // description are generated from the diff, never typed by hand.
+      const editMatch = path.match(/^\/api\/repos\/([^/]+)\/edit$/);
+      if (editMatch && req.method === "POST") {
+        const name = decodeURIComponent(editMatch[1]);
+        const body = await req.json<{
+          path?: string; content?: string; baseRef?: string;
+          mode?: "direct" | "branch"; branch?: string; message?: string;
+        }>();
+        const filePath = (body?.path ?? "").trim();
+        const content = body?.content ?? "";
+        if (!filePath) return Response.json({ error: "path is required" }, { status: 400 });
+
+        using repo = await env.ARTIFACTS.get(name);
+        const info = await repo.info();
+        const baseRef = body?.baseRef || info.defaultBranch || "main";
+
+        // Previous contents, so the description is written from a real diff.
+        let before: string | null = null;
+        const prev = await repo.readFile({ ref: baseRef, path: filePath });
+        if (prev) before = await prev.text();
+        if (before === content) {
+          return Response.json({ error: "no change — file content is identical" }, { status: 400 });
+        }
+
+        const described = await describeChange(env, filePath, before, content);
+
+        let branch = baseRef;
+        if (body?.mode === "branch") {
+          branch = (body?.branch || "").trim() ||
+            `edit/${filePath.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase()}-${Date.now().toString(36)}`;
+        }
+
+        const token = await repo.createToken("write", 600);
+        const res = await commitFile(
+          { name, remote: info.remote, token: token.plaintext },
+          {
+            path: filePath,
+            content,
+            message: body?.message?.trim() || described.message,
+            baseRef,
+            branch,
+            author: "editor",
+          },
+        );
+        return Response.json({ ...res, ...described });
+      }
+
+      const brMatch = path.match(/^\/api\/repos\/([^/]+)\/branches$/);
+      if (brMatch) {
+        const name = decodeURIComponent(brMatch[1]);
+        using repo = await env.ARTIFACTS.get(name);
+        const info = await repo.info();
+        const token = await repo.createToken("read", 300);
+        const branches = await listBranches({
+          name,
+          remote: info.remote,
+          token: token.plaintext,
+        });
+        return Response.json({ branches, defaultBranch: info.defaultBranch });
       }
 
       const logMatch = path.match(/^\/api\/repos\/([^/]+)\/log$/);

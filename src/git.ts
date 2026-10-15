@@ -111,6 +111,55 @@ export async function push(repo: RepoHandle, ws: Workspace, ref = "main") {
   });
 }
 
+/**
+ * Edit one file and push the result.
+ *
+ * `branch` may be the branch the file was read from (commit in place) or a new
+ * name (branch off it first). Either way the push is an ordinary Git push over
+ * smart HTTP — the same path agents use, so a human edit and an agent edit are
+ * indistinguishable downstream.
+ */
+export async function commitFile(
+  repo: RepoHandle,
+  opts: {
+    path: string;
+    content: string;
+    message: string;
+    baseRef: string;
+    branch: string;
+    author: string;
+  },
+): Promise<{ commit: string; branch: string; created: boolean }> {
+  const ws = await checkout(repo, opts.baseRef);
+  const created = opts.branch !== opts.baseRef;
+  if (created) {
+    await git.branch({ fs: ws.fs, dir: ws.dir, ref: opts.branch, checkout: true });
+  }
+  await writeWorkspaceFile(ws, opts.path, opts.content);
+  const commit = await commitAs(ws, opts.author, opts.message);
+  await push(repo, ws, opts.branch);
+  return { commit, branch: opts.branch, created };
+}
+
+/**
+ * Real branch list, read straight off the Git remote.
+ *
+ * Artifacts has no refs endpoint in the binding or the REST API, so the only
+ * authoritative source is the Git protocol itself.
+ */
+export async function listBranches(repo: RepoHandle): Promise<{ name: string; oid: string }[]> {
+  const refs = await git.listServerRefs({
+    http,
+    url: repo.remote,
+    prefix: "refs/heads/",
+    onAuth: authFor(repo.token),
+  });
+  return refs.map((r: any) => ({
+    name: r.ref.replace(/^refs\/heads\//, ""),
+    oid: r.oid,
+  }));
+}
+
 /** Files changed between HEAD and its parent, as a flat path list. */
 export async function changedPaths(ws: Workspace): Promise<string[]> {
   const status = await git.statusMatrix({ fs: ws.fs, dir: ws.dir });

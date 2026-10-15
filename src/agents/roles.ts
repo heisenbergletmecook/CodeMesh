@@ -168,6 +168,46 @@ Schema: {"verdict":"approve|request-changes","comments":[{"path":"src/x.ts","lin
   };
 }
 
+/**
+ * Change Intelligence — writes the commit message and proposal description
+ * from the actual diff.
+ *
+ * Nobody hand-writes a commit message in CodeMesh. The change itself is the
+ * input; the prose is derived from it, so the history stays honest about what
+ * was done rather than what someone meant to do.
+ */
+export async function describeChange(
+  env: Env,
+  path: string,
+  before: string | null,
+  after: string,
+): Promise<{ message: string; title: string; description: string }> {
+  const verb = before === null ? "created" : "modified";
+  const fallbackTitle = `${before === null ? "Add" : "Update"} ${path}`;
+  const result = await askJSON<{ message: string; title: string; description: string }>(
+    env,
+    "reviewer",
+    `You write commit messages and change descriptions from a diff.
+"message": a conventional-commit subject line, max 72 chars, imperative mood, no trailing period.
+"title": a short human title for the change proposal.
+"description": 1-3 sentences on what changed and why it matters.
+Schema: {"message":"...","title":"...","description":"..."}`,
+    `File ${verb}: ${path}\n\n` +
+      (before !== null ? `BEFORE:\n${before.slice(0, 3000)}\n\n` : "") +
+      `AFTER:\n${after.slice(0, 3000)}`,
+    { message: fallbackTitle, title: fallbackTitle, description: `${verb} ${path}.` },
+  );
+  const clamp = (s: unknown, max: number, fb: string) => {
+    const v = String(s ?? "").trim();
+    return v ? v.slice(0, max) : fb;
+  };
+  return {
+    message: clamp(result?.message, 72, fallbackTitle),
+    title: clamp(result?.title, 90, fallbackTitle),
+    description: clamp(result?.description, 500, `${verb} ${path}.`),
+  };
+}
+
 /** Auto-Fix — folds review comments and security findings back into the code. */
 export async function autofix(
   env: Env,
