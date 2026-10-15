@@ -126,6 +126,25 @@ ${head("Repository — CodeMesh")}
   .hintline.err { color: var(--bad); }
   .hintline.ok { color: var(--ok); }
   button.badge { cursor: pointer; font-family: inherit; }
+  .hrow { display: flex; gap: 11px; padding: 10px 16px; border-bottom: 1px solid var(--line-2);
+          align-items: center; font-size: 13px; }
+  .hrow:last-child { border-bottom: 0; }
+  .hrow .av {
+    width: 26px; height: 26px; border-radius: 7px; flex: none; display: grid; place-items: center;
+    background: var(--orange-soft); color: var(--orange); font-family: var(--mono);
+    font-weight: 700; font-size: 11px;
+  }
+  .hrow .m { font-weight: 550; }
+  .hrow .s { font-size: 11.5px; color: var(--faint); }
+  .hrow .ch { margin-left: auto; display: flex; gap: 8px; align-items: center; font-size: 12px; }
+  .hrow .ch .a { color: var(--ok); font-weight: 600; }
+  .hrow .ch .d { color: var(--bad); font-weight: 600; }
+  .hrow .ch .sha { font-family: var(--mono); color: var(--dim);
+                   border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; }
+  .hrow .tagc { font-size: 10.5px; border-radius: 20px; padding: 1px 8px; font-weight: 600;
+                background: var(--blue-bg); color: var(--blue); }
+  .hrow .tagc.added { background: var(--ok-bg); color: var(--ok); }
+  .hrow .tagc.removed { background: var(--bad-bg); color: var(--bad); }
 </style>
 </head>
 <body>
@@ -169,8 +188,10 @@ ${head("Repository — CodeMesh")}
             <div class="fileview" id="fileview" style="display:none">
               <div class="fileview-head"><span class="nm" id="fvName"></span>
                 <span class="spacer" style="flex:1"></span>
+                <button class="badge" id="fvHist">◷ History</button>
                 <button class="badge" id="fvEdit">✎ Edit</button>
                 <a class="badge" id="fvRaw" target="_blank" rel="noopener">Raw</a></div>
+              <div id="history" style="display:none"></div>
               <pre id="fvBody"></pre>
               <div id="editor" style="display:none">
                 <textarea id="edBody" spellcheck="false"></textarea>
@@ -333,6 +354,7 @@ async function load() {
 
 async function openFile(path, el) {
   currentPath = path;
+  $("history").style.display = "none";
   document.querySelectorAll(".files .f").forEach(n => n.classList.remove("on"));
   if (el) el.classList.add("on");
   const url = "/api/repos/" + encodeURIComponent(REPO) + "/file?path=" + encodeURIComponent(path);
@@ -382,6 +404,7 @@ $("filter").addEventListener("input", () => {
 let currentPath = null, defaultBranch = "main";
 
 $("fvEdit").onclick = () => {
+  $("history").style.display = "none";
   $("edBody").value = $("fvBody").textContent;
   $("fvBody").style.display = "none";
   $("editor").style.display = "";
@@ -421,6 +444,35 @@ $("edSave").onclick = async () => {
     msg.textContent = String(e.message || e);
   } finally {
     $("edSave").disabled = false;
+  }
+};
+
+// --- per-file history ---
+$("fvHist").onclick = async () => {
+  const h = $("history");
+  if (h.style.display !== "none") {
+    h.style.display = "none";
+    $("fvBody").style.display = "";
+    return;
+  }
+  $("fvBody").style.display = "none";
+  h.style.display = "";
+  h.innerHTML = '<div class="empty" style="padding:14px 16px">Reading history…</div>';
+  try {
+    const d = await j("/api/repos/" + encodeURIComponent(REPO) +
+      "/history?path=" + encodeURIComponent(currentPath));
+    h.innerHTML = (d.commits || []).length ? d.commits.map(c =>
+      '<div class="hrow"><div class="av">' +
+      esc(c.author.replace(/^codemesh-/, "").charAt(0).toUpperCase()) + "</div>" +
+      '<div><div class="m">' + esc(c.message) + "</div>" +
+      '<div class="s">' + esc(c.author) + " · " + new Date(c.at * 1000).toLocaleString() + "</div></div>" +
+      '<div class="ch"><span class="tagc ' + esc(c.change) + '">' + esc(c.change) + "</span>" +
+      (c.additions ? '<span class="a">+' + c.additions + "</span>" : "") +
+      (c.deletions ? '<span class="d">-' + c.deletions + "</span>" : "") +
+      '<span class="sha">' + esc(c.hash.slice(0, 7)) + "</span></div></div>").join("")
+      : '<div class="empty" style="padding:14px 16px">No recorded changes to this file.</div>';
+  } catch (e) {
+    h.innerHTML = '<div class="empty err" style="padding:14px 16px">' + esc(e.message) + "</div>";
   }
 };
 

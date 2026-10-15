@@ -23,6 +23,7 @@ import { REPO_PAGE, REPOS_PAGE } from "./ui/repo";
 import { PROPOSAL_PAGE, PROPOSALS_PAGE } from "./ui/proposal";
 import { PROFILE_PAGE } from "./ui/profile";
 import { ITEMS_PAGE, SECURITY_PAGE } from "./ui/items";
+import { SEARCH_PAGE } from "./ui/search";
 import type { Env } from "./agents/model";
 
 export { MeshCoordinator, WorkItemStore };
@@ -57,6 +58,7 @@ export default {
       if (path === "/repos") return html(REPOS_PAGE);
       if (path.startsWith("/repo/")) return html(REPO_PAGE);
       if (path === "/agents" || path === "/profile") return html(PROFILE_PAGE);
+      if (path === "/search") return html(SEARCH_PAGE);
       if (path === "/items") return html(ITEMS_PAGE);
       if (path === "/security") return html(SECURITY_PAGE);
       if (path === "/proposals") return html(PROPOSALS_PAGE);
@@ -106,6 +108,80 @@ export default {
       }
       if (path === "/api/items/update" && req.method === "POST") {
         return itemStub(env).fetch("https://items/update", { method: "POST", body: await req.text() });
+      }
+
+      // Code search across every codebase: names, paths and file contents.
+      // Bounded on repos, files and matches so one query cannot run away.
+      if (path === "/api/search") {
+        const q = (url.searchParams.get("q") ?? "").trim();
+        if (q.length < 2) return Response.json({ query: q, results: [], repos: [] });
+        const needle = q.toLowerCase();
+        const scope = url.searchParams.get("repo");
+
+        const listed = await env.ARTIFACTS.list({ limit: 100 });
+        let repos = (listed.repos ?? []) as { name: string }[];
+        if (scope) repos = repos.filter((r) => r.name === scope);
+
+        const repoHits = repos
+          .filter((r) => r.name.toLowerCase().includes(needle))
+          .map((r) => r.name)
+          .slice(0, 12);
+
+        type Hit = { repo: string; path: string; line: number; text: string };
+        const results: Hit[] = [];
+        const MAX = 60;
+
+        const searchRepo = async (name: string) => {
+          if (results.length >= MAX) return;
+          using repo = await env.ARTIFACTS.get(name);
+          const commits = await repo.log({ ref: "main", limit: 1 });
+          if (!commits.length) return;
+
+          const walkTree = async (hash: string, prefix: string): Promise<string[]> => {
+            const entries = await repo.readTree(hash);
+            if (!entries) return [];
+            const out: string[] = [];
+            for (const e of entries) {
+              const full = prefix ? `${prefix}/${e.name}` : e.name;
+              if (e.type === "tree") out.push(...(await walkTree(e.hash, full)));
+              else out.push(full);
+            }
+            return out;
+          };
+          const paths = await walkTree(commits[0].treeHash, "");
+
+          for (const p of paths.slice(0, 40)) {
+            if (results.length >= MAX) break;
+            if (p.toLowerCase().includes(needle)) {
+              results.push({ repo: name, path: p, line: 0, text: "(filename match)" });
+            }
+            const blob = await repo.readFile({ ref: "main", path: p });
+            if (!blob) continue;
+            const text = await blob.text();
+            if (!text.toLowerCase().includes(needle)) continue;
+            const lines = text.split("\n");
+            for (let i = 0; i < lines.length && results.length < MAX; i++) {
+              if (lines[i].toLowerCase().includes(needle)) {
+                results.push({ repo: name, path: p, line: i + 1, text: lines[i].trim().slice(0, 200) });
+              }
+            }
+          }
+        };
+
+        // A handful at a time: plenty fast, and it keeps well inside the
+        // 2,000 requests / 10s per-namespace control-plane limit.
+        const queue = repos.slice(0, 24);
+        for (let i = 0; i < queue.length; i += 4) {
+          if (results.length >= MAX) break;
+          await Promise.all(queue.slice(i, i + 4).map((r) => searchRepo(r.name).catch(() => {})));
+        }
+
+        return Response.json({
+          query: q,
+          repos: repoHits,
+          results: results.slice(0, MAX),
+          truncated: results.length >= MAX,
+        });
       }
 
       if (path === "/api/repos" && req.method === "POST") {
@@ -290,6 +366,57 @@ export default {
           additions: files.reduce((n, f) => n + f.additions, 0),
           deletions: files.reduce((n, f) => n + f.deletions, 0),
         });
+      }
+
+      // History of one file: walk the commit chain and keep the commits where
+      // the file's contents actually changed. Artifacts cannot filter a log by
+      // path, so the comparison happens here.
+      const histMatch = path.match(/^\/api\/repos\/([^/]+)\/history$/);
+      if (histMatch) {
+        const name = decodeURIComponent(histMatch[1]);
+        const filePath = url.searchParams.get("path");
+        if (!filePath) return Response.json({ error: "path is required" }, { status: 400 });
+        const ref = url.searchParams.get("ref") || "main";
+
+        using repo = await env.ARTIFACTS.get(name);
+        const commits = await repo.log({ ref, limit: 40 });
+
+        // Contents of the file at each commit, newest first.
+        const contents: (string | null)[] = [];
+        for (const c of commits) {
+          const blob = await repo.readFile({ ref: c.hash, path: filePath });
+          contents.push(blob ? await blob.text() : null);
+        }
+
+        type Entry = {
+          hash: string; author: string; message: string; at: number;
+          change: "added" | "modified" | "removed";
+          additions: number; deletions: number;
+        };
+        const entries: Entry[] = [];
+        const entry = (i: number, before: string | null, after: string | null): Entry => {
+          const d = diffFile(filePath, before, after);
+          return {
+            hash: commits[i].hash,
+            author: commits[i].author.name,
+            message: commits[i].message.split("\n")[0],
+            at: commits[i].committedAt,
+            change: before === null ? "added" : after === null ? "removed" : "modified",
+            additions: d.additions,
+            deletions: d.deletions,
+          };
+        };
+
+        // A commit changed the file when its contents differ from its parent's,
+        // so the change belongs to the newer of each adjacent pair.
+        for (let i = 0; i < commits.length - 1; i++) {
+          if (contents[i] !== contents[i + 1]) entries.push(entry(i, contents[i + 1], contents[i]));
+        }
+        // The oldest commit in the window introduced the file if it has it.
+        const last = commits.length - 1;
+        if (last >= 0 && contents[last] !== null) entries.push(entry(last, null, contents[last]));
+
+        return Response.json({ path: filePath, commits: entries });
       }
 
       const brMatch = path.match(/^\/api\/repos\/([^/]+)\/branches$/);

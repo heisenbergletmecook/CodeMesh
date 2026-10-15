@@ -183,6 +183,11 @@ every feature needs a model behind it.
 | **Work Items** | Persistent tracking; the Security agent files items for high-severity findings |
 | **Agent Studio** | Workspace profile — contribution heatmap and stats from real commits |
 | **Trust Center** | Every security finding across every run, plus the platform's own posture |
+| **Search** | Content search across every codebase — names, paths and file contents at `main` |
+
+A mesh can run against a codebase you created, not just a throwaway trunk: the
+codebase becomes the trunk, agents fork it, existing history is preserved and the
+merges land on top.
 
 Beyond browsing, a human can **edit a file in the browser** and choose to commit
 directly to the branch or spin the edit onto a new one. The commit message, title
@@ -193,11 +198,12 @@ nobody types them.
 
 ```bash
 npm test          # offline: proves MemFS is a valid isomorphic-git backend
-npm run audit     # end to end against the deployed Worker: 126 checks
+npm run audit     # end to end against the deployed Worker: 155 checks
 ```
 
 The audit exercises every page route, every API endpoint, the negative cases,
-work-item persistence, cross-repo diffs and a full mesh run, and asserts that no
+work-item persistence, cross-repo diffs, code search, per-file history, a mesh
+run on a fresh trunk and another on an existing codebase — and asserts that no
 write token appears in any response.
 
 ## Running it

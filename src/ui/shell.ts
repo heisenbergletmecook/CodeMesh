@@ -51,6 +51,12 @@ export const CSS = /* css */ `
   }
   .search input:focus { outline: none; border-color: var(--orange); background: #fff; }
   .search .mag { position: absolute; left: 12px; top: 8px; color: var(--faint); }
+  .search .kbd {
+    position: absolute; right: 10px; top: 9px; font-size: 10.5px; color: var(--faint);
+    border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; background: var(--panel);
+    pointer-events: none;
+  }
+  a.chip:hover { border-color: var(--orange); color: var(--orange); }
   .spacer { flex: 1; }
   .chip {
     display: flex; align-items: center; gap: 7px; border: 1px solid var(--line);
@@ -113,7 +119,7 @@ export function head(title: string): string {
 }
 
 export function sidebar(
-  active: "mesh" | "repos" | "proposals" | "agents" | "items" | "security",
+  active: "mesh" | "repos" | "proposals" | "agents" | "items" | "security" | "search",
 ): string {
   const item = (key: string, href: string, icon: string, label: string) =>
     `<a href="${href}"${active === key ? ' class="on"' : ""}><span class="ic">${icon}</span> ${label}</a>`;
@@ -136,12 +142,28 @@ export function sidebar(
 }
 
 export function topbar(placeholder: string): string {
+  // The box filters the current page as you type; Enter escalates the same
+  // text to a search across every codebase.
   return `<header>
     <div class="search"><span class="mag">⌕</span>
-      <input type="text" id="filter" placeholder="${placeholder}"></div>
+      <input type="text" id="filter" placeholder="${placeholder}"
+             title="Filter this page — press Enter to search all codebases">
+      <span class="kbd">↵ search all</span></div>
     <div class="spacer"></div>
+    <a class="chip" href="/search">⌕ Search code</a>
     <div class="chip"><img src="${MARK_SRC}" height="18" alt=""> Live</div>
-  </header>`;
+  </header>
+  <script>
+    (function () {
+      var f = document.getElementById("filter");
+      if (!f) return;
+      f.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && f.value.trim().length > 1) {
+          location.href = "/search?q=" + encodeURIComponent(f.value.trim());
+        }
+      });
+    })();
+  </script>`;
 }
 
 /** The six agent roles, shared by both screens. */

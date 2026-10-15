@@ -65,6 +65,7 @@ async function main() {
   checkPage("/profile", await get("/profile"), ["Agent Studio"]);
   checkPage("/items", await get("/items"), ["Work Items", "New work item"]);
   checkPage("/security", await get("/security"), ["Trust Center", "Platform posture"]);
+  checkPage("/search", await get("/search"), ["Search", "Search code"]);
 
   group("Trailing slash + unknown routes");
   record("routing", "/repos/ normalizes", (await get("/repos/")).status === 200);
@@ -206,6 +207,47 @@ async function main() {
     ((await get(`/api/repos/${fresh}/compare?base=main&head=main`)).json?.files || []).length === 0);
   const scoped = await get(`/api/repos/${fresh}/compare?base=main&head=${encodeURIComponent(edit1.json.branch)}&path=src/index.ts`);
   record("diff", "path filter narrows the diff", (scoped.json?.files || []).length === 1);
+
+  // --------------------------------------------------------------- search
+  group("Code search");
+  const shortQ = await get("/api/search?q=a");
+  record("search", "query under 2 chars returns nothing",
+    shortQ.status === 200 && shortQ.json?.results?.length === 0);
+  const hit = await get("/api/search?q=" + encodeURIComponent("handler"));
+  record("search", "GET /api/search finds content", hit.status === 200 && hit.json?.results?.length > 0,
+    `${hit.json?.results?.length} hit(s)`);
+  record("search", "hits carry repo, path and line",
+    (hit.json?.results || []).every((r) => r.repo && r.path && typeof r.line === "number"));
+  record("search", "content hits quote the matching line",
+    (hit.json?.results || []).filter((r) => r.line > 0).every((r) =>
+      r.text.toLowerCase().includes("handler")));
+  const nameHit = await get("/api/search?q=" + encodeURIComponent(fresh.slice(0, 8)));
+  record("search", "matches repository names", (nameHit.json?.repos || []).length > 0,
+    (nameHit.json?.repos || []).join(", "));
+  const scoped2 = await get(`/api/search?q=handler&repo=${fresh}`);
+  record("search", "repo scope narrows the search",
+    (scoped2.json?.results || []).every((r) => r.repo === fresh));
+  record("search", "nonsense query returns no hits",
+    ((await get("/api/search?q=zzzqqqnotathing")).json?.results || []).length === 0);
+
+  // -------------------------------------------------------------- history
+  group("File history");
+  record("history", "path is required",
+    (await get(`/api/repos/${fresh}/history`)).status === 400);
+  const hist = await get(`/api/repos/${fresh}/history?path=README.md`);
+  record("history", "GET /history", hist.status === 200 && Array.isArray(hist.json?.commits),
+    `${hist.json?.commits?.length} entr(ies)`);
+  record("history", "oldest entry is the add",
+    hist.json?.commits?.at(-1)?.change === "added", hist.json?.commits?.at(-1)?.change);
+  record("history", "entries carry a diffstat",
+    (hist.json?.commits || []).every((c) => typeof c.additions === "number"));
+  record("history", "README was edited directly, so it has 2 entries",
+    (hist.json?.commits || []).length >= 2, `${hist.json?.commits?.length}`);
+  record("history", "the direct edit is attributed to the editor",
+    (hist.json?.commits || [])[0]?.author?.includes("editor"),
+    (hist.json?.commits || [])[0]?.author);
+  record("history", "unchanged file has a single entry",
+    ((await get(`/api/repos/${fresh}/history?path=package.json`)).json?.commits || []).length === 1);
 
   // ----------------------------------------------------------------- mesh
   group("Full mesh run");
