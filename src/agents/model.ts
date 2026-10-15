@@ -50,13 +50,46 @@ export async function askJSON<T>(
       max_tokens: 2048,
       temperature: 0.2,
     });
-    const text: string = res?.response ?? res?.result?.response ?? "";
-    const parsed = extractJSON(text);
-    return (parsed as T) ?? fallback;
+    const parsed = coerce(res);
+    if (parsed === null) {
+      console.error(`agent ${role}: unparseable response`, JSON.stringify(res).slice(0, 600));
+      return fallback;
+    }
+    return parsed as T;
   } catch (err) {
     console.error(`agent ${role} model error`, err);
     return fallback;
   }
+}
+
+/**
+ * Workers AI models do not agree on a response shape. Some return
+ * `response` as a raw string, some return it already parsed as an object, and
+ * the OpenAI-compatible ones nest the text under `choices[].message.content`.
+ * Normalising here keeps every agent indifferent to which model it is bound to.
+ */
+function coerce(res: any): unknown | null {
+  if (res == null) return null;
+  const candidates = [
+    res.response,
+    res.result?.response,
+    res.choices?.[0]?.message?.content,
+    res.output,
+    res,
+  ];
+  for (const c of candidates) {
+    if (c == null) continue;
+    if (typeof c === "object") {
+      // Already-parsed JSON, but skip the envelope itself unless it looks like data.
+      if (c === res && !("tasks" in c || "files" in c || "findings" in c || "comments" in c)) continue;
+      return c;
+    }
+    if (typeof c === "string") {
+      const parsed = extractJSON(c);
+      if (parsed !== null) return parsed;
+    }
+  }
+  return null;
 }
 
 function extractJSON(text: string): unknown | null {
