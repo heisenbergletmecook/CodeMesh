@@ -22,6 +22,7 @@ export const MODEL_BY_ROLE: Record<string, string> = {
 export type Env = {
   ARTIFACTS: any;
   MESH: DurableObjectNamespace;
+  ITEMS: DurableObjectNamespace;
   AI: any;
 };
 

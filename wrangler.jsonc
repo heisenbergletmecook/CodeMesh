@@ -10,11 +10,13 @@
   ],
   "durable_objects": {
     "bindings": [
-      { "name": "MESH", "class_name": "MeshCoordinator" }
+      { "name": "MESH", "class_name": "MeshCoordinator" },
+      { "name": "ITEMS", "class_name": "WorkItemStore" }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["MeshCoordinator"] }
+    { "tag": "v1", "new_sqlite_classes": ["MeshCoordinator"] },
+    { "tag": "v2", "new_sqlite_classes": ["WorkItemStore"] }
   ],
   "ai": { "binding": "AI" },
   "observability": { "enabled": true }

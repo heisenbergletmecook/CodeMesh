@@ -14,15 +14,17 @@
  */
 
 import { MeshCoordinator } from "./coordinator";
+import { WorkItemStore } from "./issues";
 import { commitAs, commitFile, initWorkspace, listBranches, push, writeWorkspaceFile } from "./git";
 import { describeChange } from "./agents/roles";
 import { DASHBOARD } from "./ui/dashboard";
 import { REPO_PAGE, REPOS_PAGE } from "./ui/repo";
 import { PROPOSAL_PAGE, PROPOSALS_PAGE } from "./ui/proposal";
 import { PROFILE_PAGE } from "./ui/profile";
+import { ITEMS_PAGE, SECURITY_PAGE } from "./ui/items";
 import type { Env } from "./agents/model";
 
-export { MeshCoordinator };
+export { MeshCoordinator, WorkItemStore };
 
 /** Starter contents for a freshly created repository. */
 const SEED_FILES = (name: string): Record<string, string> => ({
@@ -33,6 +35,11 @@ const SEED_FILES = (name: string): Record<string, string> => ({
 
 function meshStub(env: Env, id: string) {
   return env.MESH.get(env.MESH.idFromName(id));
+}
+
+/** One store for the whole workspace. */
+function itemStub(env: Env) {
+  return env.ITEMS.get(env.ITEMS.idFromName("workspace"));
 }
 
 export default {
@@ -49,6 +56,8 @@ export default {
       if (path === "/repos") return html(REPOS_PAGE);
       if (path.startsWith("/repo/")) return html(REPO_PAGE);
       if (path === "/agents" || path === "/profile") return html(PROFILE_PAGE);
+      if (path === "/items") return html(ITEMS_PAGE);
+      if (path === "/security") return html(SECURITY_PAGE);
       if (path === "/proposals") return html(PROPOSALS_PAGE);
       if (path.startsWith("/proposal/")) return html(PROPOSAL_PAGE);
 
@@ -71,6 +80,18 @@ export default {
       if (meshMatch) {
         const stub = meshStub(env, meshMatch[1]);
         return stub.fetch("https://mesh/state");
+      }
+
+      // --- work items -------------------------------------------------
+      if (path === "/api/items") {
+        const stub = itemStub(env);
+        if (req.method === "POST") {
+          return stub.fetch("https://items/create", { method: "POST", body: await req.text() });
+        }
+        return stub.fetch("https://items/list" + url.search);
+      }
+      if (path === "/api/items/update" && req.method === "POST") {
+        return itemStub(env).fetch("https://items/update", { method: "POST", body: await req.text() });
       }
 
       if (path === "/api/repos" && req.method === "POST") {

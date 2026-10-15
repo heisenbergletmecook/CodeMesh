@@ -112,7 +112,9 @@ export function head(title: string): string {
 <style>${CSS}</style>`;
 }
 
-export function sidebar(active: "mesh" | "repos" | "proposals" | "agents"): string {
+export function sidebar(
+  active: "mesh" | "repos" | "proposals" | "agents" | "items" | "security",
+): string {
   const item = (key: string, href: string, icon: string, label: string) =>
     `<a href="${href}"${active === key ? ' class="on"' : ""}><span class="ic">${icon}</span> ${label}</a>`;
   return `<aside>
@@ -121,7 +123,9 @@ export function sidebar(active: "mesh" | "repos" | "proposals" | "agents"): stri
       ${item("mesh", "/", "◉", "Overview")}
       ${item("repos", "/repos", "▤", "Codebases")}
       ${item("proposals", "/proposals", "⑂", "Change Proposals")}
+      ${item("items", "/items", "◉", "Work Items")}
       ${item("agents", "/agents", "✦", "Agent Studio")}
+      ${item("security", "/security", "⛊", "Trust Center")}
     </nav>
     <div class="side-foot">
       <b>Workers + Artifacts</b>

@@ -232,6 +232,22 @@ export class MeshCoordinator {
   }
 
   /**
+   * File a work item. Never allowed to break a run: tracking is useful, but a
+   * failure to track must not lose the agent's actual work.
+   */
+  private async fileWorkItem(item: Record<string, unknown>) {
+    try {
+      const stub = this.env.ITEMS.get(this.env.ITEMS.idFromName("workspace"));
+      await stub.fetch("https://items/create", {
+        method: "POST",
+        body: JSON.stringify(item),
+      });
+    } catch (err) {
+      console.error("could not file work item", err);
+    }
+  }
+
+  /**
    * Fork the trunk for one task. This is the unit of isolation — not a branch.
    *
    * Retried with backoff: fork is a control-plane operation and occasionally
@@ -303,6 +319,20 @@ export class MeshCoordinator {
       agent.comments = rev.comments;
       agent.verdict = rev.verdict;
       this.log(agent.task.id, `security ${findings.length} finding(s), reviewer: ${rev.verdict}`);
+
+      // A high-severity finding is not something Auto-Fix should quietly paper
+      // over. File it as a work item so it survives the run and stays visible.
+      for (const f of findings.filter((x) => x.severity === "high")) {
+        await this.fileWorkItem({
+          title: `${f.path}: ${f.message}`.slice(0, 180),
+          body:
+            `Raised by the Security agent while reviewing "${agent.task.title}".\n\n` +
+            `Severity: high\nFile: ${f.path}\nProposal: ${agent.repo}\n\n${f.message}`,
+          labels: ["security", "agent-raised"],
+          author: "codemesh-security",
+          repo: agent.repo,
+        });
+      }
 
       // Auto-Fix folds blocking feedback back in before the train sees it.
       const issues = [
