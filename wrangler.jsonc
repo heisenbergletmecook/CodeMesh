@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "codemesh",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "upload_source_maps": true,
+  "artifacts": [
+    { "binding": "ARTIFACTS", "namespace": "codemesh" }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "MESH", "class_name": "MeshCoordinator" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["MeshCoordinator"] }
+  ],
+  "ai": { "binding": "AI" },
+  "observability": { "enabled": true }
+}
