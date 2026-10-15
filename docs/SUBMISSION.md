@@ -103,9 +103,9 @@ curl https://codemesh.heisenberg145.workers.dev/api/repos/<name>/log
 
 | Field | Value |
 |---|---|
-| Team name | **_still needed_** |
+| Team name | CodeMesh |
 | Primary contact | Arjun Rajapeta — heisenberg145@icloud.com |
-| Team location | **_still needed_** (city, country) |
+| Team location | Austin, Texas, USA |
 | Attendee 1 | Arjun Rajapeta — heisenberg145@icloud.com |
 | Attendee 2 | Naimisha Marri — naimisha.marri@gmail.com |
 
