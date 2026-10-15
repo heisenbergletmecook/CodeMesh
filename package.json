@@ -6,7 +6,8 @@
   "scripts": {
     "test": "node --experimental-strip-types --no-warnings test/memfs.test.ts",
     "deploy": "wrangler deploy",
-    "dev": "wrangler dev --remote"
+    "dev": "wrangler dev --remote",
+    "audit": "node test/e2e.mjs"
   },
   "keywords": [],
   "author": "",

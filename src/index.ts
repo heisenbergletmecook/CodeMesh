@@ -17,6 +17,7 @@ import { MeshCoordinator } from "./coordinator";
 import { WorkItemStore } from "./issues";
 import { commitAs, commitFile, initWorkspace, listBranches, push, writeWorkspaceFile } from "./git";
 import { describeChange } from "./agents/roles";
+import { diffFile, type FileDiff } from "./diff";
 import { DASHBOARD } from "./ui/dashboard";
 import { REPO_PAGE, REPOS_PAGE } from "./ui/repo";
 import { PROPOSAL_PAGE, PROPOSALS_PAGE } from "./ui/proposal";
@@ -208,6 +209,74 @@ export default {
           },
         );
         return Response.json({ ...res, ...described });
+      }
+
+      // Compare two refs, or a proposal against the trunk it forked from.
+      // Returns real line diffs, not a file list.
+      const cmpMatch = path.match(/^\/api\/repos\/([^/]+)\/compare$/);
+      if (cmpMatch) {
+        const headRepo = decodeURIComponent(cmpMatch[1]);
+        const baseRepo = url.searchParams.get("baseRepo") || headRepo;
+        const head = url.searchParams.get("head") || "main";
+        const base = url.searchParams.get("base") || "main";
+        const only = url.searchParams.get("path");
+
+        const read = async (repoName: string, ref: string, p: string) => {
+          using r = await env.ARTIFACTS.get(repoName);
+          const blob = await r.readFile({ ref, path: p });
+          return blob ? await blob.text() : null;
+        };
+
+        // Union of both trees so additions and removals both show up.
+        const treeOf = async (repoName: string, ref: string): Promise<string[]> => {
+          using r = await env.ARTIFACTS.get(repoName);
+          const commits = await r.log({ ref, limit: 1 });
+          if (!commits.length) return [];
+          const walkTree = async (hash: string, prefix: string): Promise<string[]> => {
+            const entries = await r.readTree(hash);
+            if (!entries) return [];
+            const out: string[] = [];
+            for (const e of entries) {
+              const full = prefix ? `${prefix}/${e.name}` : e.name;
+              if (e.type === "tree") out.push(...(await walkTree(e.hash, full)));
+              else out.push(full);
+            }
+            return out;
+          };
+          // Must await: returning the promise would let `using` dispose the
+          // stub before the recursive walk finishes with it.
+          return await walkTree(commits[0].treeHash, "");
+        };
+
+        let paths: string[];
+        if (only) {
+          paths = [only];
+        } else {
+          const [ht, bt] = await Promise.all([
+            treeOf(headRepo, head),
+            treeOf(baseRepo, base).catch(() => [] as string[]),
+          ]);
+          paths = [...new Set([...bt, ...ht])].sort();
+        }
+
+        const files: FileDiff[] = [];
+        for (const p of paths.slice(0, 60)) {
+          const [before, after] = await Promise.all([
+            read(baseRepo, base, p).catch(() => null),
+            read(headRepo, head, p).catch(() => null),
+          ]);
+          if (before === null && after === null) continue;
+          const d = diffFile(p, before, after);
+          if (d.status !== "unchanged") files.push(d);
+        }
+
+        return Response.json({
+          base: { repo: baseRepo, ref: base },
+          head: { repo: headRepo, ref: head },
+          files,
+          additions: files.reduce((n, f) => n + f.additions, 0),
+          deletions: files.reduce((n, f) => n + f.deletions, 0),
+        });
       }
 
       const brMatch = path.match(/^\/api\/repos\/([^/]+)\/branches$/);

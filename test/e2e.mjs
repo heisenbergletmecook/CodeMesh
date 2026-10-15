@@ -185,6 +185,28 @@ async function main() {
   record("items", "unknown id 404s",
     (await post("/api/items/update", { id: 999999, state: "closed" })).status === 404);
 
+  // ----------------------------------------------------------------- diff
+  group("Compare / diff");
+  const selfCmp = await get(`/api/repos/${fresh}/compare?base=main&head=${encodeURIComponent(edit1.json.branch)}`);
+  record("diff", "GET /compare across branches", selfCmp.status === 200 && Array.isArray(selfCmp.json?.files),
+    `+${selfCmp.json?.additions} -${selfCmp.json?.deletions} across ${selfCmp.json?.files?.length} file(s)`);
+  record("diff", "diff found the edited file",
+    (selfCmp.json?.files || []).some((f) => f.path === "src/index.ts"));
+  const idx = (selfCmp.json?.files || []).find((f) => f.path === "src/index.ts");
+  record("diff", "diff has hunks", (idx?.hunks || []).length > 0);
+  record("diff", "hunk header looks unified", /^@@ -\d+,\d+ \+\d+,\d+ @@/.test(idx?.hunks?.[0]?.header || ""),
+    idx?.hunks?.[0]?.header);
+  record("diff", "lines are typed add/del/ctx",
+    (idx?.hunks?.[0]?.lines || []).every((l) => ["add", "del", "ctx"].includes(l.type)));
+  record("diff", "additions carry a head line number",
+    (idx?.hunks?.[0]?.lines || []).filter((l) => l.type === "add").every((l) => l.b !== null && l.a === null));
+  record("diff", "deletions carry a base line number",
+    (idx?.hunks?.[0]?.lines || []).filter((l) => l.type === "del").every((l) => l.a !== null && l.b === null));
+  record("diff", "identical refs produce no files",
+    ((await get(`/api/repos/${fresh}/compare?base=main&head=main`)).json?.files || []).length === 0);
+  const scoped = await get(`/api/repos/${fresh}/compare?base=main&head=${encodeURIComponent(edit1.json.branch)}&path=src/index.ts`);
+  record("diff", "path filter narrows the diff", (scoped.json?.files || []).length === 1);
+
   // ----------------------------------------------------------------- mesh
   group("Full mesh run");
   record("mesh", "rejects an empty request", (await post("/api/mesh", { request: "" })).status === 400);
@@ -266,7 +288,16 @@ async function main() {
     checkPage(`/proposal/${agents[0].repo}`, await get(`/proposal/${agents[0].repo}`),
       ["Discussion", "Commits", "Changes", "Checks", "Impact", "Docs", "Deploy", "Settings"]);
   }
-  checkPage(`/repo/${state?.trunk}`, await get(`/repo/${state?.trunk}`), ["Files", "Commits"]);
+  checkPage(`/repo/${state?.trunk}`, await get(`/repo/${state?.trunk}`),
+    ["Files", "Commits", "Branches", "Settings"]);
+
+  group("Cross-repo compare (proposal vs trunk)");
+  if (agents[0]) {
+    const pc = await get(`/api/repos/${agents[0].repo}/compare?baseRepo=${state.trunk}&base=main&head=main`);
+    record("diff", "proposal diffs against its trunk", pc.status === 200 && Array.isArray(pc.json?.files),
+      `+${pc.json?.additions} -${pc.json?.deletions} across ${pc.json?.files?.length} file(s)`);
+    record("diff", "no disposed-stub error", !/disposed/.test(pc.text));
+  }
 
   // --------------------------------------------------------------- report
   console.log("\n" + "=".repeat(60));

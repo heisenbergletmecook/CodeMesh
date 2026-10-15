@@ -69,6 +69,16 @@ ${head("Repository — CodeMesh")}
   .kv .k { color: var(--faint); min-width: 104px; }
   .kv .v { color: var(--text); word-break: break-all; }
   .kv .v.mono { font-family: var(--mono); font-size: 12px; }
+  .tabs .n { background: var(--bg); border-radius: 20px; padding: 1px 7px;
+             font-size: 11.5px; margin-left: 5px; color: var(--dim); }
+  .tabs button.on .n { background: var(--orange-soft); color: var(--orange); }
+  .br { display: flex; gap: 11px; padding: 12px 16px; border-bottom: 1px solid var(--line-2); align-items: center; }
+  .br:last-child { border-bottom: 0; }
+  .br .nm { font-family: var(--mono); font-size: 13px; font-weight: 600; }
+  .br .def { font-size: 10.5px; background: var(--orange-soft); color: var(--orange);
+             border-radius: 20px; padding: 1px 9px; font-weight: 600; }
+  .br .oid { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--dim);
+             border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; }
   #edBody {
     width: 100%; min-height: 360px; border: 0; border-top: 1px solid var(--line-2);
     padding: 14px 16px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
@@ -122,6 +132,8 @@ ${head("Repository — CodeMesh")}
       <div class="tabs">
         <button class="on" data-tab="code">Code</button>
         <button data-tab="commits">Commits</button>
+        <button data-tab="branches">Branches <span class="n" id="nBranches"></span></button>
+        <button data-tab="settings">Settings</button>
       </div>
 
       <div class="row">
@@ -158,6 +170,14 @@ ${head("Repository — CodeMesh")}
             <h2>Commits <span class="hint">authored by the agent that made them</span></h2>
             <div class="commits" id="commits"><div class="empty" style="padding:14px 16px">Loading…</div></div>
           </div>
+          <div class="panel" id="paneBranches" style="display:none">
+            <h2>Branches <span class="hint">read off the Git remote</span></h2>
+            <div id="branches"><div class="empty" style="padding:14px 16px">Loading…</div></div>
+          </div>
+          <div class="panel" id="paneSettings" style="display:none">
+            <h2>Settings <span class="hint">live from the Artifacts control plane</span></h2>
+            <div class="pb"><div class="kv" id="settingsKv"></div></div>
+          </div>
         </div>
 
         <div>
@@ -178,7 +198,7 @@ ${head("Repository — CodeMesh")}
 ${ROLES_JS}
 const $ = (id) => document.getElementById(id);
 const REPO = decodeURIComponent(location.pathname.replace(/^\\/repo\\//, ""));
-let entries = [], commits = [];
+let entries = [], commits = [], repoMetaCache = null;
 
 function fmtDate(sec) {
   return new Date(sec * 1000).toLocaleString();
@@ -194,6 +214,7 @@ async function load() {
   try {
     const d = await j("/api/repos");
     const r = (d.repos || []).find(x => x.name === REPO);
+    repoMetaCache = r;
     if (r) {
       $("rdesc").textContent = r.description || "Created by a CodeMesh agent run.";
       $("rbadges").innerHTML =
@@ -249,6 +270,39 @@ async function load() {
     $("commits").innerHTML = '<div class="empty err" style="padding:14px 16px">' + esc(e.message) + "</div>";
   }
 
+  // Branches, straight off the remote.
+  try {
+    const b = await j("/api/repos/" + encodeURIComponent(REPO) + "/branches");
+    const list = b.branches || [];
+    $("nBranches").textContent = list.length;
+    $("branches").innerHTML = list.length ? list.map(x =>
+      '<div class="br"><span>⑂</span><span class="nm">' + esc(x.name) + "</span>" +
+      (x.name === b.defaultBranch ? '<span class="def">default</span>' : "") +
+      '<span class="oid">' + esc(x.oid.slice(0, 7)) + "</span></div>").join("")
+      : '<div class="empty" style="padding:14px 16px">No branches.</div>';
+  } catch (e) {
+    $("branches").innerHTML = '<div class="empty err" style="padding:14px 16px">' + esc(e.message) + "</div>";
+  }
+
+  // Settings mirror the repository details, plus the policy that is fixed.
+  if (repoMetaCache) {
+    const r = repoMetaCache;
+    $("settingsKv").innerHTML = [
+      ["Name", r.name, "mono"],
+      ["Default branch", r.defaultBranch, "mono"],
+      ["Visibility", "private to this account", ""],
+      ["Read only", String(r.readOnly), ""],
+      ["Status", r.status, ""],
+      ["Forked from", r.source || "— (root repository)", "mono"],
+      ["Jurisdiction", r.jurisdiction || "unrestricted", ""],
+      ["Repo ID", r.id, "mono"],
+      ["Git remote", r.remote, "mono"],
+      ["Merge policy", "serialized merge train — one writer", ""],
+      ["Conflict policy", "claims arbitrated at dispatch", ""],
+    ].map(([k, v, c]) =>
+      '<div><span class="k">' + k + '</span><span class="v ' + c + '">' + esc(v) + "</span></div>").join("");
+  }
+
   renderTeam();
 }
 
@@ -284,12 +338,14 @@ function renderTeam() {
   }).join("");
 }
 
+const PANES = { code: "paneCode", commits: "paneCommits", branches: "paneBranches", settings: "paneSettings" };
 document.querySelectorAll(".tabs button").forEach(b => {
   b.onclick = () => {
     document.querySelectorAll(".tabs button").forEach(x => x.classList.remove("on"));
     b.classList.add("on");
-    $("paneCode").style.display = b.dataset.tab === "code" ? "" : "none";
-    $("paneCommits").style.display = b.dataset.tab === "commits" ? "" : "none";
+    Object.entries(PANES).forEach(([k, id]) => {
+      $(id).style.display = b.dataset.tab === k ? "" : "none";
+    });
   };
 });
 $("filter").addEventListener("input", () => {

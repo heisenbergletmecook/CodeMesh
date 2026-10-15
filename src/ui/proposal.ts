@@ -123,6 +123,35 @@ ${head("Change Proposal — CodeMesh")}
     font-size: 12.5px; line-height: 1.6; background: #FCFCFD; max-height: 520px;
     border-top: 1px solid var(--line-2);
   }
+  .dstat { display: flex; gap: 10px; align-items: center; font-size: 12.5px; }
+  .dadd { color: var(--ok); font-weight: 600; } .ddel { color: var(--bad); font-weight: 600; }
+  .dbar { display: inline-flex; gap: 2px; }
+  .dbar i { width: 8px; height: 8px; border-radius: 2px; background: var(--line); }
+  .dbar i.a { background: var(--ok); } .dbar i.d { background: var(--bad); }
+  .dfile { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 11px; overflow: hidden; }
+  .dfile > .h {
+    display: flex; align-items: center; gap: 10px; padding: 9px 13px;
+    background: var(--bg); border-bottom: 1px solid var(--line); font-size: 13px; cursor: pointer;
+  }
+  .dfile > .h .p { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+  .dfile > .h .tag {
+    font-size: 10.5px; border-radius: 20px; padding: 1px 8px; font-weight: 600;
+    background: var(--blue-bg); color: var(--blue);
+  }
+  .dfile > .h .tag.added { background: var(--ok-bg); color: var(--ok); }
+  .dfile > .h .tag.removed { background: var(--bad-bg); color: var(--bad); }
+  .dbody { font-family: var(--mono); font-size: 12px; line-height: 1.55; overflow-x: auto; }
+  .dfile.collapsed .dbody { display: none; }
+  .hh { background: #EEF1F6; color: var(--dim); padding: 3px 13px; font-size: 11.5px; }
+  .dl { display: flex; white-space: pre; }
+  .dl .ln {
+    width: 46px; flex: none; text-align: right; padding: 0 8px; color: #B6BCC8;
+    background: #FBFBFD; user-select: none; border-right: 1px solid var(--line-2);
+  }
+  .dl .tx { padding: 0 10px; flex: 1; }
+  .dl.add { background: #E8F8EE; } .dl.add .tx::before { content: "+"; color: var(--ok); margin-right: 6px; }
+  .dl.del { background: #FDECEC; } .dl.del .tx::before { content: "-"; color: var(--bad); margin-right: 6px; }
+  .dl.ctx .tx::before { content: " "; margin-right: 6px; }
   .check { display: flex; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--line-2); font-size: 13.5px; }
   .check:last-child { border-bottom: 0; }
   .ci { width: 18px; flex: none; text-align: center; }
@@ -176,7 +205,7 @@ const $ = (id) => document.getElementById(id);
 const REPO = decodeURIComponent(location.pathname.replace(/^\\/proposal\\//, ""));
 const MESH_ID = (REPO.match(/^trunk-([a-z0-9]+)-/) || [])[1];
 
-let agent = null, mesh = null, commits = [], entries = [], repoMeta = null, tab = "discussion";
+let agent = null, mesh = null, commits = [], entries = [], repoMeta = null, diff = null, tab = "discussion";
 
 async function j(u) { const r = await fetch(u); if (!r.ok) throw new Error(await r.text()); return r.json(); }
 
@@ -282,7 +311,7 @@ function paintTabs() {
   const defs = [
     ["discussion", "Discussion", (a.comments || []).length],
     ["commits", "Commits", commits.length],
-    ["changes", "Changes", entries.length],
+    ["changes", "Changes", diff ? diff.files.length : entries.length],
     ["checks", "Checks", checks],
     ["agents", "Agents", 6],
     ["impact", "Impact", (a.task.claims || []).length],
@@ -348,16 +377,47 @@ function paintPane() {
   }
 
   if (tab === "changes") {
-    const changed = new Set(a.files || []);
-    $("panes").innerHTML = panel("Changes", "files in this proposal's repository",
-      '<div class="list" id="flist">' + (entries.length ? entries.map(p =>
-        '<div class="item filerow" data-path="' + esc(p) + '">' +
-        '<div class="av">' + (changed.has(p) ? "±" : "·") + "</div>" +
-        '<div style="flex:1"><div class="ttl mono">' + esc(p) + "</div>" +
-        '<div class="sub">' + (changed.has(p) ? "changed by this proposal" : "inherited from trunk") + "</div></div></div>").join("")
-        : '<div class="empty" style="padding:14px 16px">Empty.</div>') +
-      '</div><pre id="fv" style="display:none"></pre>');
-    wireFileRows();
+    if (!diff) {
+      $("panes").innerHTML = panel("Changes", "computing the diff against trunk…",
+        '<div class="empty" style="padding:14px 16px">Loading diff…</div>');
+      loadDiff();
+      return;
+    }
+    const head =
+      '<div class="pb"><div class="dstat">' +
+      '<span class="dadd">+' + diff.additions + "</span>" +
+      '<span class="ddel">-' + diff.deletions + "</span>" +
+      '<span class="muted">across ' + diff.files.length + " file(s), against <code>" +
+      esc(diff.base.repo) + "</code></span></div></div>";
+
+    const body = diff.files.length ? diff.files.map((f, i) => {
+      const total = Math.max(1, f.additions + f.deletions);
+      const bars = Array.from({ length: 5 }, (_, k) => {
+        const share = Math.round((f.additions / total) * 5);
+        return '<i class="' + (k < share ? "a" : f.deletions ? "d" : "") + '"></i>';
+      }).join("");
+      return '<div class="dfile" data-i="' + i + '">' +
+        '<div class="h"><span class="p">' + esc(f.path) + "</span>" +
+        '<span class="tag ' + esc(f.status) + '">' + esc(f.status) + "</span>" +
+        '<span class="dstat" style="margin-left:auto">' +
+        '<span class="dadd">+' + f.additions + '</span><span class="ddel">-' + f.deletions + "</span>" +
+        '<span class="dbar">' + bars + "</span></span></div>" +
+        '<div class="dbody">' + (f.hunks.length ? f.hunks.map(h =>
+          '<div class="hh">' + esc(h.header) + "</div>" +
+          h.lines.map(l =>
+            '<div class="dl ' + l.type + '">' +
+            '<span class="ln">' + (l.a ?? "") + "</span>" +
+            '<span class="ln">' + (l.b ?? "") + "</span>" +
+            '<span class="tx">' + esc(l.text) + "</span></div>").join("")
+        ).join("") : '<div class="hh">No textual changes.</div>') + "</div></div>";
+    }).join("") : '<div class="empty" style="padding:14px 16px">Identical to trunk.</div>';
+
+    $("panes").innerHTML = panel("Changes", "real line diff against the trunk this forked from",
+      head + '<div class="pb" style="padding-top:0">' + body + "</div>");
+
+    document.querySelectorAll(".dfile > .h").forEach(h => {
+      h.onclick = () => h.parentElement.classList.toggle("collapsed");
+    });
   }
 
   if (tab === "checks") {
@@ -486,6 +546,19 @@ function paintPane() {
           '<span class="' + c + '" style="word-break:break-all">' + esc(v) + "</span></div>").join("") +
         "</div></div>");
   }
+}
+
+/** Diff this proposal against the trunk it forked from. */
+async function loadDiff() {
+  const base = (mesh && mesh.trunk) || REPO.replace(/-[^-]+$/, "");
+  try {
+    diff = await j("/api/repos/" + encodeURIComponent(REPO) + "/compare" +
+      "?baseRepo=" + encodeURIComponent(base) + "&base=main&head=main");
+  } catch (e) {
+    diff = { files: [], additions: 0, deletions: 0, base: { repo: base } };
+  }
+  paintTabs();
+  if (tab === "changes") paintPane();
 }
 
 /** Markdown files in this proposal, for the Docs tab. */

@@ -173,6 +173,33 @@ every feature needs a model behind it.
 
 ---
 
+## What is in the app
+
+| Section | What it does |
+|---|---|
+| **Overview** | Start a mesh, watch agents fork, claim, commit and merge live |
+| **Codebases** | Create a codebase; browse files, commits, branches and settings |
+| **Change Proposals** | The pull-request replacement: pipeline, real diffs, checks, impact, decision |
+| **Work Items** | Persistent tracking; the Security agent files items for high-severity findings |
+| **Agent Studio** | Workspace profile — contribution heatmap and stats from real commits |
+| **Trust Center** | Every security finding across every run, plus the platform's own posture |
+
+Beyond browsing, a human can **edit a file in the browser** and choose to commit
+directly to the branch or spin the edit onto a new one. The commit message, title
+and description are written by the Change Intelligence agent from the actual diff —
+nobody types them.
+
+## Tests
+
+```bash
+npm test          # offline: proves MemFS is a valid isomorphic-git backend
+npm run audit     # end to end against the deployed Worker: 126 checks
+```
+
+The audit exercises every page route, every API endpoint, the negative cases,
+work-item persistence, cross-repo diffs and a full mesh run, and asserts that no
+write token appears in any response.
+
 ## Running it
 
 ### Requirements
