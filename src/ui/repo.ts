@@ -550,6 +550,11 @@ ${head("Repositories — CodeMesh")}
   .rl a:hover .nm { color: var(--orange); }
   .rl .sub { font-size: 12.5px; color: var(--faint); margin-top: 2px; }
   .rl .when { margin-left: auto; font-size: 12.5px; color: var(--faint); }
+  .rowacts { display: flex; gap: 6px; margin-left: 12px; }
+  .mini { background: var(--panel); border: 1px solid var(--line); border-radius: 7px;
+          padding: 4px 10px; font-size: 12px; color: var(--dim); cursor: pointer; }
+  .mini:hover { border-color: var(--orange); color: var(--orange); }
+  .mini.danger:hover { border-color: var(--bad); color: var(--bad); }
   .newbtn {
     background: var(--orange); color: #fff; border: 0; font-weight: 600;
     padding: 10px 18px; border-radius: 9px; cursor: pointer; font-size: 13.5px;
@@ -585,7 +590,18 @@ ${head("Repositories — CodeMesh")}
           <p class="page">Every codebase is a real Cloudflare Artifacts repository. Trunks hold
              integrated history; the rest are per-task agent forks.</p>
         </div>
-        <button id="newRepo" class="newbtn">+ New codebase</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button id="newRepo" class="newbtn">+ New codebase</button>
+          <button id="importBtn" class="ghostbtn">↧ Import from Git</button>
+        </div>
+      </div>
+      <div id="importBox" class="createbox" style="display:none">
+        <input type="text" id="impUrl" placeholder="https://github.com/owner/repo" autocomplete="off">
+        <input type="text" id="impName" placeholder="name (optional)" style="flex:0 0 190px;min-width:150px">
+        <button id="impGo" class="newbtn">Import</button>
+        <button id="impCancel" class="ghostbtn">Cancel</button>
+        <div class="hintline" id="impMsg">Clones a public Git repository into Artifacts. You can
+          then run a mesh on it like any other codebase.</div>
       </div>
       <div id="createBox" class="createbox" style="display:none">
         <input type="text" id="newName" placeholder="codebase name, e.g. payments-api" autocomplete="off">
@@ -618,7 +634,11 @@ function paint() {
       '<div><div class="nm">' + esc(r.name) + "</div>" +
       '<div class="sub">' + (isTrunk ? "trunk — integrated history" : "agent fork") +
       " · " + esc(r.defaultBranch) + "</div></div>" +
-      '<div class="when">' + ago(r.updatedAt || r.createdAt) + "</div></a>";
+      '<div class="when">' + ago(r.updatedAt || r.createdAt) + "</div>" +
+      '<div class="rowacts">' +
+        '<button class="mini" data-fork="' + esc(r.name) + '">Fork</button>' +
+        '<button class="mini danger" data-del="' + esc(r.name) + '">Delete</button>' +
+      "</div></a>";
   }).join("") : '<div class="empty" style="padding:14px 16px">No repositories match.</div>';
 }
 (async () => {
@@ -666,6 +686,91 @@ async function createRepo() {
   }
 }
 $("createGo").onclick = createRepo;
+
+// --- import ---
+$("importBtn").onclick = () => {
+  const b = $("importBox");
+  b.style.display = b.style.display === "flex" ? "none" : "flex";
+  if (b.style.display === "flex") $("impUrl").focus();
+};
+$("impCancel").onclick = () => { $("importBox").style.display = "none"; };
+$("impGo").onclick = async () => {
+  const url = $("impUrl").value.trim();
+  if (!url) return;
+  $("impGo").disabled = true;
+  const m = $("impMsg");
+  m.className = "hintline";
+  m.textContent = "Importing — cloning into Artifacts…";
+  try {
+    const r = await fetch("/api/import", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url, name: $("impName").value.trim() || undefined })
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    m.className = "hintline ok";
+    m.textContent = "Importing " + d.name + " — it will appear below once ready.";
+    // Import is asynchronous; poll until the repo reports ready.
+    let tries = 0;
+    const poll = setInterval(async () => {
+      tries++;
+      const list = await (await fetch("/api/repos")).json();
+      repos = list.repos || [];
+      paint();
+      const row = repos.find(x => x.name === d.name);
+      if ((row && row.status === "ready") || tries > 20) {
+        clearInterval(poll);
+        if (row && row.status === "ready") {
+          m.className = "hintline ok";
+          m.textContent = "✓ Imported " + d.name + ".";
+        }
+      }
+    }, 2500);
+  } catch (e) {
+    m.className = "hintline err";
+    m.textContent = String(e.message || e);
+  } finally { $("impGo").disabled = false; }
+};
+
+// --- per-row fork and delete ---
+function wireRowActions() {
+  document.querySelectorAll("[data-fork]").forEach(b => {
+    b.onclick = async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const src = b.dataset.fork;
+      const name = prompt("Fork " + src + " as:", src + "-fork");
+      if (!name) return;
+      b.disabled = true;
+      const r = await fetch("/api/repos/" + encodeURIComponent(src) + "/fork", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      const d = await r.json();
+      if (d.error) alert(d.error);
+      const list = await (await fetch("/api/repos")).json();
+      repos = list.repos || [];
+      paint();
+    };
+  });
+  document.querySelectorAll("[data-del]").forEach(b => {
+    b.onclick = async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const name = b.dataset.del;
+      // Deleting a repository cannot be undone, so require the exact name.
+      const typed = prompt("This permanently deletes " + name +
+        " and cannot be undone.\n\nType the name to confirm:");
+      if (typed !== name) return;
+      b.disabled = true;
+      const r = await fetch("/api/repos/" + encodeURIComponent(name) +
+        "?confirm=" + encodeURIComponent(name), { method: "DELETE" });
+      const d = await r.json();
+      if (d.error) alert(d.error);
+      const list = await (await fetch("/api/repos")).json();
+      repos = list.repos || [];
+      paint();
+    };
+  });
+}
 $("newName").addEventListener("keydown", e => { if (e.key === "Enter") createRepo(); });
 </script>
 </body>

@@ -57,6 +57,7 @@ export const CSS = /* css */ `
     pointer-events: none;
   }
   a.chip:hover { border-color: var(--orange); color: var(--orange); }
+  .dot-live { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
   .spacer { flex: 1; }
   .chip {
     display: flex; align-items: center; gap: 7px; border: 1px solid var(--line);
@@ -119,7 +120,9 @@ export function head(title: string): string {
 }
 
 export function sidebar(
-  active: "mesh" | "repos" | "proposals" | "agents" | "items" | "security" | "search",
+  active:
+    | "mesh" | "repos" | "proposals" | "agents"
+    | "items" | "security" | "search" | "profile",
 ): string {
   const item = (key: string, href: string, icon: string, label: string) =>
     `<a href="${href}"${active === key ? ' class="on"' : ""}><span class="ic">${icon}</span> ${label}</a>`;
@@ -132,6 +135,7 @@ export function sidebar(
       ${item("items", "/items", "◉", "Work Items")}
       ${item("agents", "/agents", "✦", "Agent Studio")}
       ${item("security", "/security", "⛊", "Trust Center")}
+      ${item("profile", "/profile", "◍", "Profile")}
     </nav>
     <div class="side-foot">
       <b>Workers + Artifacts</b>
@@ -151,7 +155,9 @@ export function topbar(placeholder: string): string {
       <span class="kbd">↵ search all</span></div>
     <div class="spacer"></div>
     <a class="chip" href="/search">⌕ Search code</a>
-    <div class="chip"><img src="${MARK_SRC}" height="18" alt=""> Live</div>
+    <a class="chip" href="/profile" title="Workspace profile">
+      <img src="${MARK_SRC}" height="18" alt=""> <span>codemesh</span>
+      <span class="dot-live" title="live"></span></a>
   </header>
   <script>
     (function () {

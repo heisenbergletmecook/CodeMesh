@@ -184,6 +184,58 @@ export default {
         });
       }
 
+      // Import an existing public Git repository, then run agents on it.
+      if (path === "/api/import" && req.method === "POST") {
+        const body = await req.json<{ url?: string; name?: string; branch?: string }>();
+        const srcUrl = (body?.url ?? "").trim();
+        if (!/^https:\/\/[^\s]+$/.test(srcUrl)) {
+          return Response.json({ error: "url must be an https git URL" }, { status: 400 });
+        }
+        const derived = (body?.name ?? "").trim() ||
+          (srcUrl.split("/").pop() || "imported").replace(/\.git$/, "");
+        const name = derived.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 63);
+        if (!/^[A-Za-z0-9]/.test(name)) {
+          return Response.json({ error: "derived name must start alphanumeric" }, { status: 400 });
+        }
+        try {
+          const created = await env.ARTIFACTS.import({
+            source: { url: srcUrl, branch: body?.branch || undefined, depth: 1 },
+            target: { name, opts: { description: `Imported from ${srcUrl}` } },
+          });
+          return Response.json({ name, remote: created.remote, source: srcUrl, status: "importing" });
+        } catch (err: any) {
+          return Response.json({ error: String(err?.message ?? err) }, { status: 400 });
+        }
+      }
+
+      // Fork any codebase into a new one.
+      const forkMatch = path.match(/^\/api\/repos\/([^/]+)\/fork$/);
+      if (forkMatch && req.method === "POST") {
+        const src = decodeURIComponent(forkMatch[1]);
+        const body = await req.json<{ name?: string }>();
+        const name = (body?.name ?? `${src}-fork`).trim();
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$/.test(name)) {
+          return Response.json({ error: "invalid fork name" }, { status: 400 });
+        }
+        using repo = await env.ARTIFACTS.get(src);
+        const forked = await repo.fork(name, { description: `Forked from ${src}` });
+        return Response.json({ name, remote: forked.remote, source: src });
+      }
+
+      // Delete a codebase. Irreversible, so the caller must name it exactly.
+      const delMatch = path.match(/^\/api\/repos\/([^/]+)$/);
+      if (delMatch && req.method === "DELETE") {
+        const name = decodeURIComponent(delMatch[1]);
+        if (url.searchParams.get("confirm") !== name) {
+          return Response.json(
+            { error: "pass ?confirm=<exact repo name> to delete" },
+            { status: 400 },
+          );
+        }
+        const ok = await env.ARTIFACTS.delete(name);
+        return Response.json({ deleted: ok, name });
+      }
+
       if (path === "/api/repos" && req.method === "POST") {
         const body = await req.json<{ name?: string; description?: string }>();
         const name = (body?.name ?? "").trim();

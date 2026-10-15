@@ -114,7 +114,7 @@ ${head("Agent Studio — CodeMesh")}
 </head>
 <body>
 <div class="app">
-  ${sidebar("agents")}
+  ${sidebar("profile")}
   <div>
     ${topbar("Search the workspace…")}
     <main>

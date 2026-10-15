@@ -184,6 +184,11 @@ every feature needs a model behind it.
 | **Agent Studio** | Workspace profile — contribution heatmap and stats from real commits |
 | **Trust Center** | Every security finding across every run, plus the platform's own posture |
 | **Search** | Content search across every codebase — names, paths and file contents at `main` |
+| **Profile** | Workspace identity, pinned codebases, impact and recent activity |
+
+Codebases can be **created, imported from any public Git URL, forked or deleted**.
+Importing clones a real repository into Artifacts — CodeMesh can import its own
+GitHub repo and then run agents on it.
 
 A mesh can run against a codebase you created, not just a throwaway trunk: the
 codebase becomes the trunk, agents fork it, existing history is preserved and the
@@ -198,7 +203,7 @@ nobody types them.
 
 ```bash
 npm test          # offline: proves MemFS is a valid isomorphic-git backend
-npm run audit     # end to end against the deployed Worker: 155 checks
+npm run audit     # end to end against the deployed Worker: 169 checks
 ```
 
 The audit exercises every page route, every API endpoint, the negative cases,

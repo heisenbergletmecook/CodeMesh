@@ -59,13 +59,14 @@ async function main() {
   // ---------------------------------------------------------------- pages
   group("Page routes");
   checkPage("/", await get("/"), ["Run mesh", "Overview", "Change Proposals", "Agent Studio"]);
-  checkPage("/repos", await get("/repos"), ["Codebases", "New codebase"]);
+  checkPage("/repos", await get("/repos"), ["Codebases", "New codebase", "Import from Git"]);
   checkPage("/proposals", await get("/proposals"), ["Change Proposals", "no pull requests"]);
   checkPage("/agents", await get("/agents"), ["Agent Studio", "Contribution activity", "@codemesh"]);
   checkPage("/profile", await get("/profile"), ["Agent Studio"]);
   checkPage("/items", await get("/items"), ["Work Items", "New work item"]);
   checkPage("/security", await get("/security"), ["Trust Center", "Platform posture"]);
   checkPage("/search", await get("/search"), ["Search", "Search code"]);
+  checkPage("/profile", await get("/profile"), ["CodeMesh Workspace", "Contribution activity"]);
 
   group("Trailing slash + unknown routes");
   record("routing", "/repos/ normalizes", (await get("/repos/")).status === 200);
@@ -208,6 +209,31 @@ async function main() {
   const scoped = await get(`/api/repos/${fresh}/compare?base=main&head=${encodeURIComponent(edit1.json.branch)}&path=src/index.ts`);
   record("diff", "path filter narrows the diff", (scoped.json?.files || []).length === 1);
 
+  // ------------------------------------------------- import / fork / delete
+  group("Import, fork and delete");
+  record("repo", "import rejects a non-https url",
+    (await post("/api/import", { url: "git@github.com:a/b.git" })).status === 400);
+  record("repo", "import rejects an empty url",
+    (await post("/api/import", { url: "" })).status === 400);
+
+  const forkName = `${fresh}-forked`;
+  const forked = await post(`/api/repos/${fresh}/fork`, { name: forkName });
+  record("repo", "fork a codebase", forked.status === 200 && forked.json?.name === forkName);
+  const forkLog = await get(`/api/repos/${forkName}/log`);
+  record("repo", "fork carries the source history",
+    forkLog.status === 200 && forkLog.json?.length === (await get(`/api/repos/${fresh}/log`)).json.length,
+    `${forkLog.json?.length} commits`);
+  record("repo", "fork rejects an invalid name",
+    (await post(`/api/repos/${fresh}/fork`, { name: "bad name!" })).status === 400);
+
+  const delRes = await fetch(`${BASE}/api/repos/${forkName}`, { method: "DELETE" });
+  record("repo", "delete without confirm is refused", delRes.status === 400);
+  const delOk = await fetch(`${BASE}/api/repos/${forkName}?confirm=${forkName}`, { method: "DELETE" });
+  record("repo", "delete with exact confirm succeeds", delOk.status === 200);
+  const gone = await get("/api/repos");
+  record("repo", "deleted codebase is gone",
+    !(gone.json?.repos || []).some((r) => r.name === forkName));
+
   // --------------------------------------------------------------- search
   group("Code search");
   const shortQ = await get("/api/search?q=a");
@@ -227,8 +253,11 @@ async function main() {
   const scoped2 = await get(`/api/search?q=handler&repo=${fresh}`);
   record("search", "repo scope narrows the search",
     (scoped2.json?.results || []).every((r) => r.repo === fresh));
+  // Built at runtime: a literal here would be found in this very file once
+  // CodeMesh's own source has been imported into a codebase.
+  const nonsense = "zq" + Math.random().toString(36).slice(2) + "xv";
   record("search", "nonsense query returns no hits",
-    ((await get("/api/search?q=zzzqqqnotathing")).json?.results || []).length === 0);
+    ((await get("/api/search?q=" + nonsense)).json?.results || []).length === 0, nonsense);
 
   // -------------------------------------------------------------- history
   group("File history");
