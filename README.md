@@ -202,14 +202,20 @@ nobody types them.
 ## Tests
 
 ```bash
-npm test          # offline: proves MemFS is a valid isomorphic-git backend
-npm run audit     # end to end against the deployed Worker: 169 checks
+npm test            # offline: proves MemFS is a valid isomorphic-git backend
+npm run audit       # functional, against the deployed Worker: 181 checks
+npm run audit:ui    # UI wiring: 80 checks
 ```
 
-The audit exercises every page route, every API endpoint, the negative cases,
-work-item persistence, cross-repo diffs, code search, per-file history, a mesh
-run on a fresh trunk and another on an existing codebase — and asserts that no
-write token appears in any response.
+The functional audit exercises every page route and API endpoint, the negative
+cases, work-item persistence, cross-repo diffs, code search, per-file history,
+tags, import/fork/delete, a mesh run on a fresh trunk and another on an existing
+codebase — and asserts that no write token appears in any response.
+
+The UI audit catches what a status code cannot: it parses every inline script
+(a syntax error there kills every control while the markup still looks fine),
+checks that every element id the script reaches for exists, that ids are unique,
+that no button is left unwired, and that every link target resolves.
 
 ## Running it
 

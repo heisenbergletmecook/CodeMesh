@@ -99,102 +99,123 @@ curl https://codemesh.heisenberg145.workers.dev/api/repos/<name>/log
 - ☑ MIT licensed, `LICENSE` present in the repository root
 - ☑ Public repository
 
-## Still needed from you
+## Team
+
+- Members: Arjun Rajapeta, Naimisha Marri
+
+Still needed for the form:
 
 - Team name
-- Primary contact name + email
+- Primary contact email (and which member is primary)
 - Team location
-- Attendee 1 name + email (attendee 2 optional)
+- Email for each of the two attendees
 
 ---
 
 # Demo video script — target 7:00
 
-Record at 1920×1080, browser zoom 100%, nothing else on screen. Do a full mesh run
-once *before* recording so repositories already exist and the pages are populated.
+Record at 1920x1080, browser zoom 100%, nothing else on screen.
 
-### 0:00 — 0:50 · The premise
+**Before recording**, set the stage so the screens are populated but not noisy.
+The workspace currently holds ~100 scratch codebases from audit runs; deleting
+the `e2e_*` ones first will make Codebases read as deliberate rather than
+cluttered.
 
-On the Overview page, on the hero line.
+The run below is real and already in the workspace — `heisenberg-payments-api`.
+You can re-run it live or walk the existing one.
 
-> "Branches exist because repositories used to be expensive. Cloning was slow, disks
-> were finite. Pull requests, merge conflicts, review queues — all of it is downstream
-> of that one constraint.
+### 0:00 - 0:50 - The premise
+
+Open Overview, on the hero line.
+
+> "Branches exist because repositories used to be expensive. Cloning was slow,
+> disks were finite. Pull requests, merge conflicts, review queues - all of it
+> is downstream of that one constraint.
 >
-> On Cloudflare Artifacts, that constraint is gone. Forking is a binding primitive and
-> repositories are unlimited. So CodeMesh doesn't add agents on top of GitHub. It
-> removes the part of GitHub that only existed because repos were scarce."
+> On Cloudflare Artifacts that constraint is gone. Forking is a binding
+> primitive and repositories are unlimited. So CodeMesh doesn't add agents on
+> top of GitHub. It removes the part of GitHub that only existed because repos
+> were scarce."
 
-### 0:50 — 2:00 · Start a run
+### 0:50 - 1:40 - A codebase, and a human change
 
-Type: *Add Google OAuth authentication with session handling*. Press **Run mesh**.
+Codebases -> `heisenberg-payments-api` -> open `src/index.ts` -> **Edit**.
+Add a line. Choose **Create a new branch**. Commit.
 
-> "The Orchestrator doesn't just split this into tasks. It makes every task declare,
-> up front, which files it intends to touch."
+> "A person can work here too. But I don't write the commit message - the diff
+> does. A Change Intelligence agent reads the actual change and writes the
+> message, the title and the description."
 
-Let the agent cards appear. Point at the claim chips.
+Show the generated message appear, then the new branch under **Branches**.
 
-### 2:00 — 3:00 · The strongest 60 seconds. Do not rush.
+### 1:40 - 3:00 - Hand it to the swarm
 
-Point at the cards marked **sequenced**.
+On the same codebase, use **Run a mesh on this codebase**:
+*Add request validation and audit logging to the payments API*
 
-> "These two both claimed `src/index.ts`. The coordinator caught that at dispatch —
-> before either agent wrote a line — and sequenced one behind the other.
+> "The Orchestrator doesn't just split this into tasks. It makes every task
+> declare, up front, which files it intends to touch."
+
+Let the cards appear. Point at the claim chips.
+
+### 3:00 - 4:00 - The strongest minute. Do not rush it.
+
+Point at the card marked **sequenced** (`implement-logging`, behind
+`add-validation` - both claimed `src/payments/api.ts`).
+
+> "These two both claimed the same file. The coordinator caught it at dispatch,
+> before either agent wrote a line, and sequenced one behind the other.
 >
-> That's the whole idea. A merge conflict isn't a merge problem. It's a scheduling
-> problem we've always discovered too late, after both sides already did the work.
-> With a hundred thousand agents, that waste is the dominant cost. Here it never
-> happens."
+> That's the whole idea. A merge conflict isn't a merge problem. It's a
+> scheduling problem we've always discovered too late, after both sides already
+> did the work. With a hundred thousand agents, that waste is the dominant
+> cost. Here it never happens."
 
-### 3:00 — 4:15 · Inside one proposal
+### 4:00 - 5:15 - Inside a change proposal
 
-Click a card through to its Change Proposal. Walk the pipeline strip, then tabs.
+Open the `implement-logging` proposal. Walk the pipeline strip left to right,
+then the tabs.
 
-> "There's no pull request. A change proposal is the agent's own forked repository.
-> Developer wrote the code, Testing wrote tests and flagged what it expects to fail,
-> Security and Reviewer ran concurrently, Auto-Fix folded the blocking feedback back in
-> before this ever reached the merge train."
+> "There's no pull request. A change proposal is the agent's own forked
+> repository."
 
-Open **Checks** — show the real findings. Open **Impact** — show the real overlap.
+- **Discussion** - what the mesh decided, written by the agents
+- **Changes** - real diff against the fork point (+114 / -0)
+- **Checks** - 3 security findings, reviewer requested changes
+- **Impact** - the overlap the mesh had to resolve
 
-### 4:15 — 5:00 · The merge train
+### 5:15 - 5:50 - The merge train
 
 Back to Overview, scroll the coordinator log.
 
-> "Integration is serialized, so trunk has exactly one writer. Where two proposals did
-> touch the same file, the supersede is written into the log — not left as a conflict
-> marker for a human."
+> "Integration is serialized, so trunk has exactly one writer. Where two
+> proposals touched the same file, the supersede is written into the log - not
+> left as a conflict marker for a human."
 
-### 5:00 — 6:00 · A human in the loop
+Then **Trust Center**: every finding across every run. Then **Work Items**:
 
-Codebases → `testing_codemesh` → open `src/index.ts` → **Edit**. Change something.
-Choose **Create a new branch**.
+> "High-severity findings aren't quietly patched. The Security agent files them
+> as work items, so they outlive the run."
 
-> "A human can edit too. But I don't write the commit message — the diff does. The
-> Change Intelligence agent reads the actual change and writes the message, the title
-> and the description."
+### 5:50 - 6:40 - Prove it is real
 
-Show the generated message, then the new branch appearing.
-
-### 6:00 — 6:45 · Prove it is real
-
-Drop to a terminal. This is what convinces a judge.
+Terminal. This is the part that convinces a judge.
 
 ```bash
 curl https://codemesh.heisenberg145.workers.dev/api/repos
-curl https://codemesh.heisenberg145.workers.dev/api/repos/trunk-<id>/log
+curl https://codemesh.heisenberg145.workers.dev/api/repos/heisenberg-payments-api/log
 ```
 
-> "Every one of these is a real Artifacts repository. Real commits, each authored by
-> the agent that made it. And all of it was pushed from a Worker — no disk, no git
-> binary. Artifacts has no write API at all, so CodeMesh runs isomorphic-git over an
-> in-memory filesystem and pushes over smart HTTP."
+> "Every one of these is a real Artifacts repository. Real commits, each
+> authored by the agent that made it. And all of it was pushed from a Worker -
+> no disk, no git binary. Artifacts has no write API at all, so CodeMesh runs
+> isomorphic-git over an in-memory filesystem and pushes over smart HTTP."
 
-### 6:45 — 7:00 · Close, honestly
+### 6:40 - 7:00 - Close, honestly
 
-> "What isn't done: test execution. The Testing agent writes real tests and predicts
-> failures, but running them needs Sandboxes and Containers. That's in the README, and
-> it's the next thing we'd build."
+> "What isn't done: test execution. The Testing agent writes real tests and
+> predicts which assertions fail, but running them needs Sandboxes and
+> Containers. It's in the README, and it's the next thing we'd build."
 
-**Say this.** Naming your own gap is more convincing than hiding it, and a judge will
-find it anyway.
+**Say this.** Naming your own gap is more convincing than hiding it, and a judge
+will find it anyway.
