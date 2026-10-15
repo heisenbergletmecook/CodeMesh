@@ -40,27 +40,38 @@ export async function askJSON<T>(
   system: string,
   user: string,
   fallback: T,
+  attempts = 3,
 ): Promise<T> {
   const model = MODEL_BY_ROLE[role] ?? GENERAL;
-  try {
-    const res = await env.AI.run(model, {
-      messages: [
-        { role: "system", content: system + "\n\nRespond with JSON only. No prose, no code fences." },
-        { role: "user", content: user },
-      ],
-      max_tokens: 2048,
-      temperature: 0.2,
-    });
-    const parsed = coerce(res);
-    if (parsed === null) {
-      console.error(`agent ${role}: unparseable response`, JSON.stringify(res).slice(0, 600));
-      return fallback;
+
+  // Small models intermittently answer with prose, a truncated object, or
+  // nothing usable. One bad sample must not end a run, so retry with rising
+  // temperature — a different sample usually parses — before giving up.
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await env.AI.run(model, {
+        messages: [
+          {
+            role: "system",
+            content: system + "\n\nRespond with JSON only. No prose, no code fences.",
+          },
+          { role: "user", content: user },
+        ],
+        max_tokens: 2048,
+        temperature: attempt === 1 ? 0.2 : 0.5,
+      });
+      const parsed = coerce(res);
+      if (parsed !== null) return parsed as T;
+      console.error(
+        `agent ${role}: unparseable response (attempt ${attempt}/${attempts})`,
+        JSON.stringify(res).slice(0, 400),
+      );
+    } catch (err) {
+      console.error(`agent ${role} model error (attempt ${attempt}/${attempts})`, err);
     }
-    return parsed as T;
-  } catch (err) {
-    console.error(`agent ${role} model error`, err);
-    return fallback;
+    if (attempt < attempts) await new Promise((r) => setTimeout(r, 250 * attempt));
   }
+  return fallback;
 }
 
 /**

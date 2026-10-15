@@ -58,7 +58,7 @@ Schema: {"tasks":[{"id":"kebab-id","title":"...","claims":["src/foo.ts"]}]}`,
     { tasks: [] },
   );
   const tasks = Array.isArray(result?.tasks) ? result.tasks : [];
-  return tasks
+  const planned = tasks
     .filter((t) => t && t.id && t.title)
     .map((t, i) => ({
       id: String(t.id || `task-${i + 1}`).replace(/[^a-z0-9-]/gi, "-").toLowerCase(),
@@ -66,6 +66,18 @@ Schema: {"tasks":[{"id":"kebab-id","title":"...","claims":["src/foo.ts"]}]}`,
       claims: Array.isArray(t.claims) ? t.claims.map(String) : [],
     }))
     .slice(0, 4);
+
+  if (planned.length) return planned;
+
+  // The planner is the single point of failure for a run: if it returns
+  // nothing usable even after retries, fall back to executing the request as
+  // one task rather than losing the run entirely. Degraded, not dead.
+  const slug = request
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40) || "task-1";
+  return [{ id: slug, title: request.slice(0, 90), claims: ["src/index.ts"] }];
 }
 
 /**

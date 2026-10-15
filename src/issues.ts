@@ -1,9 +1,12 @@
 /**
- * WorkItemStore — one Durable Object holding the work items for the workspace.
+ * WorkItemStore — the workspace's durable store.
  *
- * Real persistence, not a stub: items survive restarts, carry comments, and can
- * be opened by a human or raised by an agent. Agents file them when a security
- * finding is severe enough that Auto-Fix should not silently paper over it.
+ * Holds work items and the registry of mesh runs. One instance for the whole
+ * workspace, so both are a single consistent place to read from.
+ *
+ * Work items are real persistence, not a stub: they survive restarts, carry
+ * comments, and can be opened by a human or raised by an agent. Agents file
+ * them when a security finding is too severe for Auto-Fix to quietly patch.
  */
 
 export type WorkItem = {
@@ -19,6 +22,13 @@ export type WorkItem = {
   comments: { author: string; body: string; at: number }[];
 };
 
+export type MeshRun = {
+  meshId: string;
+  trunk: string;
+  request: string;
+  at: number;
+};
+
 export class WorkItemStore {
   private state: DurableObjectState;
 
@@ -32,6 +42,11 @@ export class WorkItemStore {
 
   private async save(items: WorkItem[]) {
     await this.state.storage.put("items", items);
+  }
+
+  /** Registry of mesh runs, so a proposal can be traced back to its run. */
+  private async runs(): Promise<MeshRun[]> {
+    return (await this.state.storage.get<MeshRun[]>("runs")) ?? [];
   }
 
   async fetch(req: Request): Promise<Response> {
@@ -89,6 +104,21 @@ export class WorkItemStore {
         item.updatedAt = Date.now();
         await this.save(items);
         return Response.json(item);
+      }
+
+      if (op === "runs") {
+        return Response.json({ runs: (await this.runs()).sort((a, b) => b.at - a.at) });
+      }
+
+      if (op === "register") {
+        const run = await req.json<MeshRun>();
+        const runs = await this.runs();
+        if (!runs.some((r) => r.meshId === run.meshId)) {
+          runs.push(run);
+          // Keep the registry bounded; the repos themselves are the archive.
+          await this.state.storage.put("runs", runs.slice(-200));
+        }
+        return Response.json({ ok: true });
       }
 
       return new Response("not found", { status: 404 });

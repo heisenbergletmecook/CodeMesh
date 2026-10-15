@@ -96,10 +96,12 @@ export class MeshCoordinator {
     const url = new URL(req.url);
     try {
       if (url.pathname.endsWith("/start")) {
-        const { request, meshId } = await req.json<{ request: string; meshId: string }>();
+        const { request, meshId, repo } = await req.json<{
+          request: string; meshId: string; repo?: string;
+        }>();
         // Kick the run off in the background so the HTTP call returns at once
         // and the dashboard can watch the mesh fill in.
-        this.state.waitUntil(this.run(meshId, request));
+        this.state.waitUntil(this.run(meshId, request, repo));
         return Response.json({ ok: true, meshId });
       }
       if (url.pathname.endsWith("/state")) {
@@ -121,8 +123,12 @@ export class MeshCoordinator {
     }
   }
 
-  private async run(meshId: string, request: string) {
-    const trunk = `trunk-${meshId}`;
+  /**
+   * @param existingRepo run against a codebase the user already has, instead of
+   *   seeding a throwaway trunk. The repo becomes the trunk; agents fork it.
+   */
+  private async run(meshId: string, request: string, existingRepo?: string) {
+    const trunk = existingRepo || `trunk-${meshId}`;
     this.mesh = {
       id: meshId,
       request,
@@ -135,30 +141,47 @@ export class MeshCoordinator {
     await this.save();
 
     try {
-      // --- Seed the trunk -------------------------------------------------
-      this.log("coordinator", `creating trunk repo ${trunk}`);
-      const created = await this.env.ARTIFACTS.create(trunk, { setDefaultBranch: "main" });
-      const trunkRepo: RepoHandle = {
-        name: trunk,
-        remote: created.remote,
-        token: created.token,
-      };
-      const ws = await initWorkspace();
-      for (const [path, content] of Object.entries(SEED)) {
-        await writeWorkspaceFile(ws, path, content);
-      }
-      const seedCommit = await commitAs(ws, "coordinator", "chore: seed trunk");
-      await push(trunkRepo, ws);
-      this.log("coordinator", `trunk seeded at ${seedCommit.slice(0, 7)}`);
-      await this.save();
+      await this.register({ meshId, trunk, request, at: Date.now() });
 
-      const baseFiles = await snapshot(ws);
+      // --- Establish the trunk ---------------------------------------------
+      let trunkRepo: RepoHandle;
+      let baseFiles: Record<string, string>;
+
+      if (existingRepo) {
+        // Run against a codebase that already exists: read it, do not seed it.
+        this.log("coordinator", `using existing codebase ${trunk} as trunk`);
+        using repo = await this.env.ARTIFACTS.get(trunk);
+        const info = await repo.info();
+        const token = await repo.createToken("write", 1800);
+        trunkRepo = { name: trunk, remote: info.remote, token: token.plaintext };
+        const ws = await checkout(trunkRepo);
+        baseFiles = await snapshot(ws);
+        this.log("coordinator", `read ${Object.keys(baseFiles).length} existing file(s)`);
+      } else {
+        this.log("coordinator", `creating trunk repo ${trunk}`);
+        const created = await this.env.ARTIFACTS.create(trunk, { setDefaultBranch: "main" });
+        trunkRepo = { name: trunk, remote: created.remote, token: created.token };
+        const ws = await initWorkspace();
+        for (const [path, content] of Object.entries(SEED)) {
+          await writeWorkspaceFile(ws, path, content);
+        }
+        const seedCommit = await commitAs(ws, "coordinator", "chore: seed trunk");
+        await push(trunkRepo, ws);
+        this.log("coordinator", `trunk seeded at ${seedCommit.slice(0, 7)}`);
+        baseFiles = await snapshot(ws);
+      }
+      await this.save();
 
       // --- Plan -----------------------------------------------------------
       this.log("orchestrator", "decomposing request into concurrent tasks");
       const tasks = await orchestrate(this.env, request, baseFiles);
       if (!tasks.length) throw new Error("orchestrator produced no tasks");
-      this.log("orchestrator", `planned ${tasks.length} tasks`);
+      this.log(
+        "orchestrator",
+        tasks.length === 1 && tasks[0].title === request.slice(0, 90)
+          ? "planner degraded — executing the request as a single task"
+          : `planned ${tasks.length} tasks`,
+      );
 
       // --- Claim arbitration ----------------------------------------------
       // Two tasks that claim the same path cannot run concurrently. We detect
@@ -173,7 +196,7 @@ export class MeshCoordinator {
         }
         return {
           task,
-          repo: `${trunk}-${task.id}`,
+          repo: existingRepo ? `${trunk}-${meshId}-${task.id}` : `${trunk}-${task.id}`,
           status: blockedBy.length ? "blocked" : "claimed",
           files: [],
           failures: [],
@@ -228,6 +251,16 @@ export class MeshCoordinator {
         await this.save();
       }
       console.error("mesh run failed", err);
+    }
+  }
+
+  /** Record the run so a proposal can be traced back to it later. */
+  private async register(run: Record<string, unknown>) {
+    try {
+      const stub = this.env.ITEMS.get(this.env.ITEMS.idFromName("workspace"));
+      await stub.fetch("https://items/register", { method: "POST", body: JSON.stringify(run) });
+    } catch (err) {
+      console.error("could not register run", err);
     }
   }
 

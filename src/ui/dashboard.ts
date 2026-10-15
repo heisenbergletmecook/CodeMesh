@@ -22,6 +22,12 @@ ${head("CodeMesh — agent-native source control")}
     border-radius: 9px; padding: 11px 14px; font-size: 14px; color: var(--text);
   }
   .prompt input:focus { outline: none; border-color: var(--orange); }
+  .prompt select {
+    background: #fff; border: 1px solid var(--orange-line); border-radius: 9px;
+    padding: 11px 12px; font-size: 13.5px; color: var(--text); font-family: inherit;
+    max-width: 230px;
+  }
+  .prompt select:focus { outline: none; border-color: var(--orange); }
   button.go {
     background: var(--orange); color: #fff; border: 0; font-weight: 600;
     padding: 11px 22px; border-radius: 9px; cursor: pointer; font-size: 14px;
@@ -91,6 +97,9 @@ ${head("CodeMesh — agent-native source control")}
         <div class="prompt">
           <input type="text" id="req" placeholder="Describe what the swarm should build…"
                  value="Add rate limiting and structured request logging to the service">
+          <select id="target" title="Where the agents work">
+            <option value="">New demo trunk</option>
+          </select>
           <button class="go" id="go">Run mesh</button>
         </div>
         <div class="examples">
@@ -153,6 +162,10 @@ async function loadRepos() {
   try {
     const d = await (await fetch("/api/repos")).json();
     const rows = (d.repos || []).slice(0, 8);
+    // Only a codebase you made is a sensible mesh target; forks are not.
+    const targets = (d.repos || []).filter(r => !/^trunk-/.test(r.name));
+    $("target").innerHTML = '<option value="">New demo trunk</option>' +
+      targets.map(r => '<option value="' + esc(r.name) + '">' + esc(r.name) + "</option>").join("");
     $("replist").innerHTML = rows.length ? rows.map(r =>
       '<a href="/repo/' + encodeURIComponent(r.name) + '">' +
       '<span class="nm">' + esc(r.name) + "</span>" +
@@ -170,7 +183,7 @@ async function start() {
   try {
     const res = await fetch("/api/mesh", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ request })
+      body: JSON.stringify({ request, repo: $("target").value || undefined })
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);

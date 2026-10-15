@@ -299,6 +299,52 @@ async function main() {
     record("diff", "no disposed-stub error", !/disposed/.test(pc.text));
   }
 
+  group("Mesh against an existing codebase");
+  record("mesh", "unknown repo is rejected",
+    (await post("/api/mesh", { request: "x", repo: "nope_not_here" })).status === 404);
+
+  const beforeLog = await get(`/api/repos/${fresh}/log`);
+  const started2 = await post("/api/mesh", {
+    request: "Add a structured logger module",
+    repo: fresh,
+  });
+  record("mesh", "accepts an existing codebase as trunk",
+    started2.status === 200 && started2.json?.trunk === fresh, started2.json?.trunk);
+
+  let s2 = null;
+  for (let i = 0; i < 60; i++) {
+    await sleep(5000);
+    s2 = (await get(`/api/mesh/${started2.json.meshId}`)).json;
+    if (s2?.phase === "done" || s2?.phase === "error") break;
+    process.stdout.write(`\r       …${s2?.phase} ${(s2?.agents || []).length} agent(s)   `);
+  }
+  process.stdout.write("\r" + " ".repeat(50) + "\r");
+  record("mesh", "run on existing codebase completed", s2?.phase === "done",
+    `phase=${s2?.phase} ${s2?.error || ""}`);
+  record("mesh", "it read the existing files",
+    (s2?.log || []).some((l) => /existing file/.test(l.msg)),
+    (s2?.log || []).find((l) => /existing file/.test(l.msg))?.msg);
+  record("mesh", "forks are namespaced by run",
+    (s2?.agents || []).every((a) => a.repo.startsWith(`${fresh}-${started2.json.meshId}-`)),
+    (s2?.agents || [])[0]?.repo);
+
+  const afterLog = await get(`/api/repos/${fresh}/log`);
+  record("mesh", "existing history is preserved",
+    afterLog.json.at(-1)?.hash === beforeLog.json.at(-1)?.hash,
+    `base ${(beforeLog.json.at(-1)?.hash || "").slice(0, 7)}`);
+  record("mesh", "merges landed on top",
+    afterLog.json.length > beforeLog.json.length,
+    `${beforeLog.json.length} -> ${afterLog.json.length} commits`);
+
+  group("Run registry");
+  const runs = await get("/api/runs");
+  record("api", "GET /api/runs", runs.status === 200 && Array.isArray(runs.json?.runs),
+    `${runs.json?.runs?.length} run(s)`);
+  record("api", "the run we just made is registered",
+    (runs.json?.runs || []).some((r) => r.meshId === started2.json.meshId));
+  record("api", "runs carry trunk and request",
+    (runs.json?.runs || []).every((r) => r.trunk && r.request && r.at));
+
   // --------------------------------------------------------------- report
   console.log("\n" + "=".repeat(60));
   const byGroup = {};

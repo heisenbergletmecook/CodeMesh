@@ -69,6 +69,21 @@ ${head("Repository — CodeMesh")}
   .kv .k { color: var(--faint); min-width: 104px; }
   .kv .v { color: var(--text); word-break: break-all; }
   .kv .v.mono { font-family: var(--mono); font-size: 12px; }
+  .runbox {
+    background: linear-gradient(110deg, #FFF8F4, #FFEFE6);
+    border: 1px solid var(--orange-line); border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 16px;
+  }
+  .runhead { font-size: 13.5px; font-weight: 650; color: var(--orange); margin-bottom: 9px; }
+  .runrow { display: flex; gap: 9px; flex-wrap: wrap; }
+  .runrow input {
+    flex: 1; min-width: 260px; background: #fff; border: 1px solid var(--orange-line);
+    border-radius: 9px; padding: 10px 13px; font-size: 13.5px; color: var(--text);
+  }
+  .runrow input:focus { outline: none; border-color: var(--orange); }
+  .runlog { margin-top: 10px; font-family: var(--mono); font-size: 11.5px;
+            color: var(--dim); max-height: 150px; overflow-y: auto; }
+  .runlog div { padding: 1px 0; }
   .tabs .n { background: var(--bg); border-radius: 20px; padding: 1px 7px;
              font-size: 11.5px; margin-left: 5px; color: var(--dim); }
   .tabs button.on .n { background: var(--orange-soft); color: var(--orange); }
@@ -127,6 +142,16 @@ ${head("Repository — CodeMesh")}
           <div class="desc" id="rdesc"></div>
           <div class="badges" id="rbadges"></div>
         </div>
+      </div>
+
+      <div class="runbox">
+        <div class="runhead">✦ Run a mesh on this codebase</div>
+        <div class="runrow">
+          <input type="text" id="runReq" placeholder="Describe what the swarm should build here…">
+          <button class="newbtn" id="runGo">Run mesh</button>
+        </div>
+        <div class="hintline" id="runMsg">Agents fork this codebase, work concurrently, and
+          integrate back into it through the merge train.</div>
       </div>
 
       <div class="tabs">
@@ -398,6 +423,53 @@ $("edSave").onclick = async () => {
     $("edSave").disabled = false;
   }
 };
+
+// --- run a mesh against this codebase ---
+let runTimer = null;
+$("runGo").onclick = async () => {
+  const request = $("runReq").value.trim();
+  if (!request) return;
+  $("runGo").disabled = true;
+  const msg = $("runMsg");
+  msg.className = "hintline";
+  msg.textContent = "Starting mesh…";
+  try {
+    const r = await fetch("/api/mesh", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ request, repo: REPO })
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    clearInterval(runTimer);
+    runTimer = setInterval(async () => {
+      try {
+        const m = await (await fetch("/api/mesh/" + d.meshId)).json();
+        msg.className = "hintline";
+        msg.innerHTML = "<b>" + esc(m.phase) + "</b> — " +
+          (m.agents || []).length + " agent(s) · " +
+          (m.agents || []).filter(a => a.status === "merged").length + " merged" +
+          '<div class="runlog">' + (m.log || []).slice(-6).map(l =>
+            "<div><b>" + esc(l.agent) + "</b> " + esc(l.msg) + "</div>").join("") + "</div>";
+        if (m.phase === "done" || m.phase === "error") {
+          clearInterval(runTimer);
+          $("runGo").disabled = false;
+          if (m.phase === "done") {
+            msg.className = "hintline ok";
+            msg.innerHTML = "✓ Mesh complete — " +
+              (m.agents || []).filter(a => a.status === "merged").length +
+              ' proposal(s) merged. <a href="/proposals">View change proposals →</a>';
+            load();
+          }
+        }
+      } catch (e) {}
+    }, 1200);
+  } catch (e) {
+    msg.className = "hintline err";
+    msg.textContent = String(e.message || e);
+    $("runGo").disabled = false;
+  }
+};
+$("runReq").addEventListener("keydown", e => { if (e.key === "Enter") $("runGo").click(); });
 
 load();
 </script>

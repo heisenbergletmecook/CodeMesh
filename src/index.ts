@@ -63,18 +63,28 @@ export default {
       if (path.startsWith("/proposal/")) return html(PROPOSAL_PAGE);
 
       if (path === "/api/mesh" && req.method === "POST") {
-        const body = await req.json<{ request?: string }>();
+        const body = await req.json<{ request?: string; repo?: string }>();
         const request = (body?.request ?? "").trim();
         if (!request) {
           return Response.json({ error: "request is required" }, { status: 400 });
+        }
+        const repo = (body?.repo ?? "").trim() || undefined;
+        if (repo) {
+          // Fail fast with a clear message rather than deep inside the run.
+          try {
+            using check = await env.ARTIFACTS.get(repo);
+            await check.info();
+          } catch {
+            return Response.json({ error: `codebase "${repo}" not found` }, { status: 404 });
+          }
         }
         const meshId = `m${Date.now().toString(36)}`;
         const stub = meshStub(env, meshId);
         await stub.fetch("https://mesh/start", {
           method: "POST",
-          body: JSON.stringify({ request, meshId }),
+          body: JSON.stringify({ request, meshId, repo }),
         });
-        return Response.json({ meshId });
+        return Response.json({ meshId, trunk: repo ?? `trunk-${meshId}` });
       }
 
       const meshMatch = path.match(/^\/api\/mesh\/([a-z0-9]+)$/i);
@@ -90,6 +100,9 @@ export default {
           return stub.fetch("https://items/create", { method: "POST", body: await req.text() });
         }
         return stub.fetch("https://items/list" + url.search);
+      }
+      if (path === "/api/runs") {
+        return itemStub(env).fetch("https://items/runs");
       }
       if (path === "/api/items/update" && req.method === "POST") {
         return itemStub(env).fetch("https://items/update", { method: "POST", body: await req.text() });
