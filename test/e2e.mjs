@@ -234,6 +234,24 @@ async function main() {
   record("repo", "deleted codebase is gone",
     !(gone.json?.repos || []).some((r) => r.name === forkName));
 
+  // ----------------------------------------------------------------- tags
+  group("Tags");
+  record("tags", "empty repo has no tags",
+    ((await get(`/api/repos/${fresh}/tags`)).json?.tags || []).length === 0);
+  record("tags", "invalid tag name rejected",
+    (await post(`/api/repos/${fresh}/tags`, { tag: "bad tag!" })).status === 400);
+  const tagMade = await post(`/api/repos/${fresh}/tags`, { tag: "v1.0.0" });
+  record("tags", "create a tag", tagMade.status === 200 && tagMade.json?.tag === "v1.0.0",
+    (tagMade.json?.oid || "").slice(0, 7));
+  const tagList = await get(`/api/repos/${fresh}/tags`);
+  record("tags", "tag is on the remote",
+    (tagList.json?.tags || []).some((t) => t.name === "v1.0.0"));
+  record("tags", "tag points at main",
+    (tagList.json?.tags || [])[0]?.oid === (await get(`/api/repos/${fresh}/log`)).json[0].hash);
+  record("tags", "compare against a tag works",
+    (await get(`/api/repos/${fresh}/compare?base=v1.0.0&head=main`)).status === 200);
+  checkPage(`/compare/${fresh}`, await get(`/compare/${fresh}`), ["Compare refs", "base"]);
+
   // --------------------------------------------------------------- search
   group("Code search");
   const shortQ = await get("/api/search?q=a");
@@ -360,7 +378,7 @@ async function main() {
       ["Discussion", "Commits", "Changes", "Checks", "Impact", "Docs", "Deploy", "Settings"]);
   }
   checkPage(`/repo/${state?.trunk}`, await get(`/repo/${state?.trunk}`),
-    ["Files", "Commits", "Branches", "Settings"]);
+    ["Files", "Commits", "Branches", "Tags", "Settings"]);
 
   group("Cross-repo compare (proposal vs trunk)");
   if (agents[0]) {

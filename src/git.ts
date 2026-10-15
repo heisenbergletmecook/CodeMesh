@@ -160,6 +160,46 @@ export async function listBranches(repo: RepoHandle): Promise<{ name: string; oi
   }));
 }
 
+/** Tags, read off the Git remote. */
+export async function listTags(repo: RepoHandle): Promise<{ name: string; oid: string }[]> {
+  const refs = await git.listServerRefs({
+    http,
+    url: repo.remote,
+    prefix: "refs/tags/",
+    onAuth: authFor(repo.token),
+  });
+  return refs
+    .map((r: any) => ({ name: r.ref.replace(/^refs\/tags\//, ""), oid: r.oid }))
+    // Annotated tags also advertise a peeled `^{}` ref; the plain one is enough.
+    .filter((t) => !t.name.endsWith("^{}"));
+}
+
+/**
+ * Create a lightweight tag at a ref and push it.
+ *
+ * Artifacts exposes no ref API, so a tag is created locally and pushed like any
+ * other ref.
+ */
+export async function createTag(
+  repo: RepoHandle,
+  tag: string,
+  ref: string,
+): Promise<{ tag: string; oid: string }> {
+  const ws = await checkout(repo, ref);
+  const oid = await git.resolveRef({ fs: ws.fs, dir: ws.dir, ref: "HEAD" });
+  await git.tag({ fs: ws.fs, dir: ws.dir, ref: tag, object: oid });
+  await git.push({
+    fs: ws.fs,
+    dir: ws.dir,
+    http,
+    url: repo.remote,
+    ref: `refs/tags/${tag}`,
+    remoteRef: `refs/tags/${tag}`,
+    onAuth: authFor(repo.token),
+  });
+  return { tag, oid };
+}
+
 /** Files changed between HEAD and its parent, as a flat path list. */
 export async function changedPaths(ws: Workspace): Promise<string[]> {
   const status = await git.statusMatrix({ fs: ws.fs, dir: ws.dir });

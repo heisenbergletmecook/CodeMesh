@@ -15,7 +15,10 @@
 
 import { MeshCoordinator } from "./coordinator";
 import { WorkItemStore } from "./issues";
-import { commitAs, commitFile, initWorkspace, listBranches, push, writeWorkspaceFile } from "./git";
+import {
+  commitAs, commitFile, createTag, initWorkspace,
+  listBranches, listTags, push, writeWorkspaceFile,
+} from "./git";
 import { describeChange } from "./agents/roles";
 import { diffFile, type FileDiff } from "./diff";
 import { DASHBOARD } from "./ui/dashboard";
@@ -24,6 +27,7 @@ import { PROPOSAL_PAGE, PROPOSALS_PAGE } from "./ui/proposal";
 import { PROFILE_PAGE } from "./ui/profile";
 import { ITEMS_PAGE, SECURITY_PAGE } from "./ui/items";
 import { SEARCH_PAGE } from "./ui/search";
+import { COMPARE_PAGE } from "./ui/compare";
 import type { Env } from "./agents/model";
 
 export { MeshCoordinator, WorkItemStore };
@@ -59,6 +63,7 @@ export default {
       if (path.startsWith("/repo/")) return html(REPO_PAGE);
       if (path === "/agents" || path === "/profile") return html(PROFILE_PAGE);
       if (path === "/search") return html(SEARCH_PAGE);
+      if (path.startsWith("/compare/")) return html(COMPARE_PAGE);
       if (path === "/items") return html(ITEMS_PAGE);
       if (path === "/security") return html(SECURITY_PAGE);
       if (path === "/proposals") return html(PROPOSALS_PAGE);
@@ -469,6 +474,31 @@ export default {
         if (last >= 0 && contents[last] !== null) entries.push(entry(last, null, contents[last]));
 
         return Response.json({ path: filePath, commits: entries });
+      }
+
+      // Tags, read off the remote; POST creates one at a ref.
+      const tagMatch = path.match(/^\/api\/repos\/([^/]+)\/tags$/);
+      if (tagMatch) {
+        const name = decodeURIComponent(tagMatch[1]);
+        using repo = await env.ARTIFACTS.get(name);
+        const info = await repo.info();
+        if (req.method === "POST") {
+          const body = await req.json<{ tag?: string; ref?: string }>();
+          const tag = (body?.tag ?? "").trim();
+          if (!/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,62}$/.test(tag)) {
+            return Response.json({ error: "invalid tag name" }, { status: 400 });
+          }
+          const wt = await repo.createToken("write", 600);
+          const made = await createTag(
+            { name, remote: info.remote, token: wt.plaintext },
+            tag,
+            body?.ref || info.defaultBranch || "main",
+          );
+          return Response.json(made);
+        }
+        const rt = await repo.createToken("read", 300);
+        const tags = await listTags({ name, remote: info.remote, token: rt.plaintext });
+        return Response.json({ tags });
       }
 
       const brMatch = path.match(/^\/api\/repos\/([^/]+)\/branches$/);

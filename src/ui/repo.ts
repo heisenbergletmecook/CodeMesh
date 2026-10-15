@@ -177,6 +177,7 @@ ${head("Repository — CodeMesh")}
         <button class="on" data-tab="code">Code</button>
         <button data-tab="commits">Commits</button>
         <button data-tab="branches">Branches <span class="n" id="nBranches"></span></button>
+        <button data-tab="tags">Tags <span class="n" id="nTags"></span></button>
         <button data-tab="settings">Settings</button>
       </div>
 
@@ -219,6 +220,11 @@ ${head("Repository — CodeMesh")}
           <div class="panel" id="paneBranches" style="display:none">
             <h2>Branches <span class="hint">read off the Git remote</span></h2>
             <div id="branches"><div class="empty" style="padding:14px 16px">Loading…</div></div>
+          </div>
+          <div class="panel" id="paneTags" style="display:none">
+            <h2>Tags <span class="hint">real git tags on the remote</span>
+              <span class="right" style="margin-left:auto"><button class="mini" id="newTag">+ New tag</button></span></h2>
+            <div id="tags"><div class="empty" style="padding:14px 16px">Loading…</div></div>
           </div>
           <div class="panel" id="paneSettings" style="display:none">
             <h2>Settings <span class="hint">live from the Artifacts control plane</span></h2>
@@ -324,11 +330,16 @@ async function load() {
     $("branches").innerHTML = list.length ? list.map(x =>
       '<div class="br"><span>⑂</span><span class="nm">' + esc(x.name) + "</span>" +
       (x.name === b.defaultBranch ? '<span class="def">default</span>' : "") +
-      '<span class="oid">' + esc(x.oid.slice(0, 7)) + "</span></div>").join("")
+      '<span class="oid">' + esc(x.oid.slice(0, 7)) + "</span>" +
+      '<a class="mini" href="/compare/' + encodeURIComponent(REPO) +
+      "?base=" + encodeURIComponent(b.defaultBranch || "main") +
+      "&head=" + encodeURIComponent(x.name) + '">Compare</a></div>').join("")
       : '<div class="empty" style="padding:14px 16px">No branches.</div>';
   } catch (e) {
     $("branches").innerHTML = '<div class="empty err" style="padding:14px 16px">' + esc(e.message) + "</div>";
   }
+
+  await loadTags();
 
   // Settings mirror the repository details, plus the policy that is fixed.
   if (repoMetaCache) {
@@ -385,7 +396,8 @@ function renderTeam() {
   }).join("");
 }
 
-const PANES = { code: "paneCode", commits: "paneCommits", branches: "paneBranches", settings: "paneSettings" };
+const PANES = { code: "paneCode", commits: "paneCommits", branches: "paneBranches",
+                tags: "paneTags", settings: "paneSettings" };
 document.querySelectorAll(".tabs button").forEach(b => {
   b.onclick = () => {
     document.querySelectorAll(".tabs button").forEach(x => x.classList.remove("on"));
@@ -445,6 +457,33 @@ $("edSave").onclick = async () => {
   } finally {
     $("edSave").disabled = false;
   }
+};
+
+async function loadTags() {
+  try {
+    const t = await j("/api/repos/" + encodeURIComponent(REPO) + "/tags");
+    const list = t.tags || [];
+    $("nTags").textContent = list.length;
+    $("tags").innerHTML = list.length ? list.map(x =>
+      '<div class="br"><span>🏷</span><span class="nm">' + esc(x.name) + "</span>" +
+      '<span class="oid">' + esc(x.oid.slice(0, 7)) + "</span></div>").join("")
+      : '<div class="empty" style="padding:14px 16px">No tags yet.</div>';
+  } catch (e) {
+    $("tags").innerHTML = '<div class="empty err" style="padding:14px 16px">' + esc(e.message) + "</div>";
+  }
+}
+
+$("newTag").onclick = async () => {
+  const tag = prompt("Tag name (e.g. v1.0.0):");
+  if (!tag) return;
+  $("tags").innerHTML = '<div class="empty" style="padding:14px 16px">Creating tag…</div>';
+  const r = await fetch("/api/repos/" + encodeURIComponent(REPO) + "/tags", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ tag })
+  });
+  const d = await r.json();
+  if (d.error) alert(d.error);
+  loadTags();
 };
 
 // --- per-file history ---
