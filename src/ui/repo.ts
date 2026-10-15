@@ -112,6 +112,13 @@ ${head("Repository — CodeMesh")}
     border: 1px solid var(--orange-line); border-radius: 8px;
     font-size: 12.5px; color: #8A5A44;
   }
+  .cb-who { display: flex; gap: 9px; align-items: center; margin: 9px 0; }
+  .cb-who label { font-size: 12.5px; color: var(--faint); }
+  .cb-who input {
+    background: #fff; border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 11px; font-size: 12.5px; font-family: var(--mono); width: 190px;
+  }
+  .cb-who input:focus { outline: none; border-color: var(--orange); }
   .cb-actions { display: flex; gap: 8px; margin-top: 4px; }
   .newbtn {
     background: var(--orange); color: #fff; border: 0; font-weight: 600;
@@ -204,6 +211,10 @@ ${head("Repository — CodeMesh")}
                     <span><b>Commit directly to <code id="cbBranch">main</code></b></span></label>
                   <div class="cb-ai">✦ The commit message and description are written by the
                     Change Intelligence agent from your actual diff — you do not type them.</div>
+                  <div class="cb-who">
+                    <label>Author</label>
+                    <input type="text" id="edAuthor" value="heisenberg" spellcheck="false">
+                  </div>
                   <div class="cb-actions">
                     <button class="newbtn" id="edSave">Commit change</button>
                     <button class="ghostbtn" id="edCancel">Cancel</button>
@@ -441,7 +452,10 @@ $("edSave").onclick = async () => {
   try {
     const res = await fetch("/api/repos/" + encodeURIComponent(REPO) + "/edit", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: currentPath, content: $("edBody").value, mode })
+      body: JSON.stringify({
+        path: currentPath, content: $("edBody").value, mode,
+        author: $("edAuthor").value.trim() || undefined,
+      })
     });
     const d = await res.json();
     if (d.error) throw new Error(d.error);
@@ -571,7 +585,7 @@ load();
 export const REPOS_PAGE = /* html */ `<!doctype html>
 <html lang="en">
 <head>
-${head("Repositories — CodeMesh")}
+${head("Codebases — CodeMesh")}
 <style>
   h1.page { margin: 0 0 4px; font-size: 22px; letter-spacing: -.4px; font-weight: 650; }
   p.page { margin: 0 0 18px; color: var(--dim); font-size: 13.5px; }
@@ -797,7 +811,7 @@ function wireRowActions() {
       const name = b.dataset.del;
       // Deleting a repository cannot be undone, so require the exact name.
       const typed = prompt("This permanently deletes " + name +
-        " and cannot be undone.\n\nType the name to confirm:");
+        " and cannot be undone.\\n\\nType the name to confirm:");
       if (typed !== name) return;
       b.disabled = true;
       const r = await fetch("/api/repos/" + encodeURIComponent(name) +

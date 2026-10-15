@@ -317,7 +317,12 @@ export default {
         const body = await req.json<{
           path?: string; content?: string; baseRef?: string;
           mode?: "direct" | "branch"; branch?: string; message?: string;
+          author?: string;
         }>();
+        // Who the commit is attributed to. Sanitised because it lands in a
+        // git author field.
+        const author = (body?.author ?? "editor").trim()
+          .replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 40) || "editor";
         const filePath = (body?.path ?? "").trim();
         const content = body?.content ?? "";
         if (!filePath) return Response.json({ error: "path is required" }, { status: 400 });
@@ -351,7 +356,7 @@ export default {
             message: body?.message?.trim() || described.message,
             baseRef,
             branch,
-            author: "editor",
+            author,
           },
         );
         return Response.json({ ...res, ...described });

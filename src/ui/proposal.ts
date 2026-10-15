@@ -160,7 +160,7 @@ ${head("Change Proposal — CodeMesh")}
   .decide { position: sticky; top: 76px; }
   .decide .btn {
     width: 100%; border: 0; border-radius: 9px; padding: 11px; font-size: 14px;
-    font-weight: 600; cursor: default; margin-top: 10px;
+    font-weight: 600; cursor: default; margin-top: 10px; text-align: center;
   }
   .btn-merged { background: var(--ok); color: #fff; }
   .btn-wait { background: var(--bg); color: var(--faint); border: 1px solid var(--line); }
@@ -203,7 +203,23 @@ const $ = (id) => document.getElementById(id);
 
 // /proposal/<forkRepoName>  e.g. trunk-mmv8x4bh9-create-authentication-service
 const REPO = decodeURIComponent(location.pathname.replace(/^\\/proposal\\//, ""));
-const MESH_ID = (REPO.match(/^trunk-([a-z0-9]+)-/) || [])[1];
+// A fork is "<trunk>-<taskId>" for a demo trunk, but "<trunk>-<meshId>-<taskId>"
+// when the mesh ran on an existing codebase — so the run id cannot always be
+// read out of the name. The run registry is the fallback.
+let MESH_ID = (REPO.match(/^trunk-([a-z0-9]+)-/) || [])[1];
+
+async function resolveMeshId() {
+  if (MESH_ID) return MESH_ID;
+  try {
+    const { runs } = await j("/api/runs");
+    // Longest trunk first, so "payments-api" cannot shadow "payments-api-v2".
+    const match = (runs || [])
+      .filter(r => REPO.startsWith(r.trunk + "-"))
+      .sort((a, b) => b.trunk.length - a.trunk.length)[0];
+    if (match) MESH_ID = match.meshId;
+  } catch (e) { /* fall back to the repo-only view */ }
+  return MESH_ID;
+}
 
 let agent = null, mesh = null, commits = [], entries = [], repoMeta = null, diff = null, tab = "discussion";
 
@@ -232,14 +248,24 @@ const STEPS = [
     st: (a) => a.status === "merged" ? "Integrated" : "Pending" },
 ];
 
+/** Best-effort task id when the run state has rolled off. */
+function taskIdFromRepo() {
+  if (mesh && mesh.trunk && REPO.startsWith(mesh.trunk + "-")) {
+    return REPO.slice(mesh.trunk.length + 1).replace(/^m[a-z0-9]{6,}-/, "");
+  }
+  return REPO.replace(/^trunk-[a-z0-9]+-/, "");
+}
+
 async function load() {
   $("cId").textContent = REPO;
-  if (!MESH_ID) { $("cTitle").textContent = "Not a proposal repository"; return; }
+  await resolveMeshId();
 
-  try {
-    mesh = await j("/api/mesh/" + MESH_ID);
-    agent = (mesh.agents || []).find(a => a.repo === REPO);
-  } catch (e) { /* run state may have rolled off */ }
+  if (MESH_ID) {
+    try {
+      mesh = await j("/api/mesh/" + MESH_ID);
+      agent = (mesh.agents || []).find(a => a.repo === REPO);
+    } catch (e) { /* run state may have rolled off */ }
+  }
 
   try {
     const d = await j("/api/repos");
@@ -250,7 +276,7 @@ async function load() {
 
   if (!agent) {
     agent = {
-      task: { id: REPO.replace(/^trunk-[a-z0-9]+-/, ""), title: REPO.replace(/^trunk-[a-z0-9]+-/, "").replace(/-/g, " "), claims: [] },
+      task: { id: taskIdFromRepo(), title: taskIdFromRepo().replace(/-/g, " "), claims: [] },
       repo: REPO, status: commits.length > 1 ? "merged" : "ready",
       files: [], findings: [], comments: [], failures: [], blockedBy: [],
       commit: commits[0] && commits[0].hash,
@@ -387,8 +413,8 @@ function paintPane() {
       '<div class="pb"><div class="dstat">' +
       '<span class="dadd">+' + diff.additions + "</span>" +
       '<span class="ddel">-' + diff.deletions + "</span>" +
-      '<span class="muted">across ' + diff.files.length + " file(s), against <code>" +
-      esc(diff.base.repo) + "</code></span></div></div>";
+      '<span class="muted">across ' + diff.files.length +
+      " file(s), against the fork point</span></div></div>";
 
     const body = diff.files.length ? diff.files.map((f, i) => {
       const total = Math.max(1, f.additions + f.deletions);
@@ -548,14 +574,29 @@ function paintPane() {
   }
 }
 
-/** Diff this proposal against the trunk it forked from. */
+/**
+ * Diff this proposal against the point it forked from.
+ *
+ * Not against the trunk as it stands now: once the merge train has run, trunk
+ * also contains every sibling proposal, and diffing against it would report
+ * their work as deletions. The fork's own parent commit is the fork point, so
+ * comparing HEAD against it shows exactly what this agent changed.
+ */
 async function loadDiff() {
-  const base = (mesh && mesh.trunk) || REPO.replace(/-[^-]+$/, "");
+  const trunk = (mesh && mesh.trunk) || REPO.replace(/-[^-]+$/, "");
   try {
-    diff = await j("/api/repos/" + encodeURIComponent(REPO) + "/compare" +
-      "?baseRepo=" + encodeURIComponent(base) + "&base=main&head=main");
+    const log = commits.length
+      ? commits
+      : await j("/api/repos/" + encodeURIComponent(REPO) + "/log");
+    const parent = log[0] && log[0].parents && log[0].parents[0];
+    diff = parent
+      ? await j("/api/repos/" + encodeURIComponent(REPO) + "/compare" +
+          "?base=" + encodeURIComponent(parent) + "&head=main")
+      : await j("/api/repos/" + encodeURIComponent(REPO) + "/compare" +
+          "?baseRepo=" + encodeURIComponent(trunk) + "&base=main&head=main");
+    diff.base = { repo: REPO, ref: "fork point" };
   } catch (e) {
-    diff = { files: [], additions: 0, deletions: 0, base: { repo: base } };
+    diff = { files: [], additions: 0, deletions: 0, base: { repo: trunk } };
   }
   paintTabs();
   if (tab === "changes") paintPane();
@@ -595,9 +636,11 @@ function paintDecision() {
   ];
   $("decision").innerHTML = rows.map(([c, i, t]) =>
     '<div class="sum"><span class="' + c + '">' + i + "</span><span>" + esc(t) + "</span></div>").join("") +
+    // A status readout, not a control: rendering it as a button would invite
+    // a click that does nothing.
     (a.status === "merged"
-      ? '<button class="btn btn-merged">⇶ Integrated into trunk</button>'
-      : '<button class="btn btn-wait">Awaiting merge train</button>') +
+      ? '<div class="btn btn-merged" role="status">⇶ Integrated into trunk</div>'
+      : '<div class="btn btn-wait" role="status">Awaiting merge train</div>') +
     '<div class="sub" style="margin-top:9px">No human approval gate: the mesh decides, and every ' +
     'decision above is recorded in the commit history.</div>';
 }
@@ -674,7 +717,10 @@ function paint() {
   const q = $("filter").value.toLowerCase();
   const f = rows.filter(r => r.name.toLowerCase().includes(q));
   $("list").innerHTML = f.length ? f.map(r => {
-    const task = r.name.replace(/^trunk-[a-z0-9]+-/, "").replace(/-/g, " ");
+    const task = r.name
+      .replace(/^trunk-[a-z0-9]+-/, "")
+      .replace(/^.*?-m[a-z0-9]{6,}-/, "")
+      .replace(/-/g, " ");
     return '<a href="/proposal/' + encodeURIComponent(r.name) + '">' +
       '<div class="ico">⑂</div><div><div class="nm">' +
       esc(task.charAt(0).toUpperCase() + task.slice(1)) + "</div>" +
@@ -684,9 +730,17 @@ function paint() {
 }
 (async () => {
   try {
-    const d = await (await fetch("/api/repos")).json();
-    // A proposal is a fork: trunk-<meshid>-<taskid>. A bare trunk is not one.
-    rows = (d.repos || []).filter(r => /^trunk-[a-z0-9]+-.+/.test(r.name));
+    const [d, reg] = await Promise.all([
+      (await fetch("/api/repos")).json(),
+      (await fetch("/api/runs")).json().catch(() => ({ runs: [] })),
+    ]);
+    const trunks = (reg.runs || []).map(r => r.trunk);
+    // Demo trunks are named trunk-<id>, so their forks are recognisable by
+    // name. A run on an existing codebase forks that codebase instead, and
+    // only the run registry can tell those apart from ordinary codebases.
+    rows = (d.repos || []).filter(r =>
+      /^trunk-[a-z0-9]+-.+/.test(r.name) ||
+      trunks.some(t => r.name !== t && r.name.startsWith(t + "-")));
     paint();
   } catch (e) {
     $("list").innerHTML = '<div class="empty err" style="padding:14px 16px">' + esc(e.message) + "</div>";

@@ -15,11 +15,13 @@ export const PROFILE_PAGE = /* html */ `<!doctype html>
 ${head("Agent Studio — CodeMesh")}
 <style>
   .ptabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 18px; overflow-x: auto; }
-  .ptabs button {
-    background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer;
-    padding: 10px 15px; font-size: 13.5px; color: var(--dim); font-weight: 500; white-space: nowrap;
+  .ptabs button, .ptabs span {
+    background: none; border: 0; border-bottom: 2px solid transparent;
+    padding: 10px 15px; font-size: 13.5px; color: var(--dim); font-weight: 500;
+    white-space: nowrap; display: inline-block; font-family: inherit;
   }
-  .ptabs button.on { color: var(--orange); border-bottom-color: var(--orange); font-weight: 600; }
+  .ptabs button { cursor: pointer; }
+  .ptabs .on { color: var(--orange); border-bottom-color: var(--orange); font-weight: 600; }
 
   .player { display: grid; grid-template-columns: 330px 1fr 330px; gap: 16px; align-items: start; }
   @media (max-width: 1400px) { .player { grid-template-columns: 300px 1fr; } }
@@ -119,7 +121,7 @@ ${head("Agent Studio — CodeMesh")}
     ${topbar("Search the workspace…")}
     <main>
       <div class="ptabs">
-        <button class="on">Overview</button>
+        <span class="on" aria-current="page">Overview</span>
         <button onclick="location.href='/repos'">Codebases</button>
         <button onclick="location.href='/proposals'">Change Proposals</button>
         <button onclick="location.href='/'">Activity</button>
