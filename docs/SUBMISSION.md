@@ -101,14 +101,17 @@ curl https://codemesh.heisenberg145.workers.dev/api/repos/<name>/log
 
 ## Team
 
-- Members: Arjun Rajapeta, Naimisha Marri
+| Field | Value |
+|---|---|
+| Team name | **_still needed_** |
+| Primary contact | Arjun Rajapeta — heisenberg145@icloud.com |
+| Team location | **_still needed_** (city, country) |
+| Attendee 1 | Arjun Rajapeta — heisenberg145@icloud.com |
+| Attendee 2 | Naimisha Marri — naimisha.marri@gmail.com |
 
-Still needed for the form:
-
-- Team name
-- Primary contact email (and which member is primary)
-- Team location
-- Email for each of the two attendees
+Eligibility confirmed: both attendees are 18+, resident in an eligible country,
+and able to attend Cloudflare Connect in San Francisco on 21 October 2026.
+Finalists are notified on 16 October.
 
 ---
 
