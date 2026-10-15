@@ -42,6 +42,8 @@ type AgentState = {
   verdict?: string;
   /** Task ids this one waits on because their claims overlap. */
   blockedBy: string[];
+  /** The forked repo this task owns, provisioned before dispatch. */
+  fork?: RepoHandle;
   error?: string;
 };
 
@@ -101,7 +103,17 @@ export class MeshCoordinator {
         return Response.json({ ok: true, meshId });
       }
       if (url.pathname.endsWith("/state")) {
-        return Response.json((await this.load()) ?? { phase: "idle", agents: [], log: [] });
+        const mesh = await this.load();
+        if (!mesh) return Response.json({ phase: "idle", agents: [], log: [] });
+        // Each agent's fork handle carries a repo-scoped WRITE token. The
+        // dashboard never needs it, so it must not cross the wire.
+        return Response.json({
+          ...mesh,
+          agents: mesh.agents.map(({ fork, ...rest }) => ({
+            ...rest,
+            remote: fork?.remote,
+          })),
+        });
       }
       return new Response("not found", { status: 404 });
     } catch (err: any) {
@@ -180,15 +192,24 @@ export class MeshCoordinator {
       this.mesh.phase = "running";
       await this.save();
 
-      // --- Dispatch ---------------------------------------------------------
-      // Unblocked tasks run genuinely concurrently, each in its own fork.
-      const free = this.mesh.agents.filter((a) => !a.blockedBy.length);
-      const sequenced = this.mesh.agents.filter((a) => a.blockedBy.length);
+      // --- Provision workspaces --------------------------------------------
+      // Forking is serialized: concurrent forks of the same trunk make the
+      // Artifacts control plane return an internal error. Fork creation is fast
+      // and is not the part we want to parallelize anyway — the agent work is.
+      for (const agent of this.mesh.agents) {
+        agent.fork = await this.provision(agent, trunkRepo);
+      }
+      await this.save();
 
-      await Promise.all(free.map((a) => this.runAgent(a, trunkRepo, baseFiles)));
+      // --- Dispatch ---------------------------------------------------------
+      // Unblocked tasks now run genuinely concurrently, each in its own fork.
+      const free = this.mesh.agents.filter((a) => !a.blockedBy.length && a.fork);
+      const sequenced = this.mesh.agents.filter((a) => a.blockedBy.length && a.fork);
+
+      await Promise.all(free.map((a) => this.runAgent(a, baseFiles)));
       for (const a of sequenced) {
         // Sequenced work rebases on whatever the trunk looks like by now.
-        await this.runAgent(a, trunkRepo, baseFiles);
+        await this.runAgent(a, baseFiles);
       }
 
       // --- Merge train ------------------------------------------------------
@@ -210,19 +231,43 @@ export class MeshCoordinator {
     }
   }
 
-  /** One task, start to finish, inside its own forked repo. */
-  private async runAgent(agent: AgentState, trunkRepo: RepoHandle, baseFiles: Record<string, string>) {
-    try {
-      // Fork the trunk. This is the unit of isolation — not a branch.
-      this.log(agent.task.id, `forking ${trunkRepo.name} -> ${agent.repo}`);
-      using trunk = await this.env.ARTIFACTS.get(trunkRepo.name);
-      const forked = await trunk.fork(agent.repo);
-      const forkRepo: RepoHandle = {
-        name: agent.repo,
-        remote: forked.remote,
-        token: forked.token ?? trunkRepo.token,
-      };
+  /**
+   * Fork the trunk for one task. This is the unit of isolation — not a branch.
+   *
+   * Retried with backoff: fork is a control-plane operation and occasionally
+   * returns a transient internal error under load.
+   */
+  private async provision(agent: AgentState, trunkRepo: RepoHandle): Promise<RepoHandle | null> {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        using trunk = await this.env.ARTIFACTS.get(trunkRepo.name);
+        const forked = await trunk.fork(agent.repo);
+        this.log(agent.task.id, `forked ${trunkRepo.name} -> ${agent.repo}`);
+        return {
+          name: agent.repo,
+          remote: forked.remote,
+          token: forked.token ?? trunkRepo.token,
+        };
+      } catch (err: any) {
+        const msg = String(err?.message ?? err);
+        if (attempt === 3) {
+          agent.status = "failed";
+          agent.error = `fork failed: ${msg}`;
+          this.log(agent.task.id, agent.error);
+          await this.save();
+          return null;
+        }
+        this.log(agent.task.id, `fork attempt ${attempt} failed (${msg}), retrying`);
+        await new Promise((r) => setTimeout(r, 400 * attempt));
+      }
+    }
+    return null;
+  }
 
+  /** One task, start to finish, inside the fork it was given. */
+  private async runAgent(agent: AgentState, baseFiles: Record<string, string>) {
+    const forkRepo = agent.fork!;
+    try {
       const ws = await checkout(forkRepo);
 
       // Developer
